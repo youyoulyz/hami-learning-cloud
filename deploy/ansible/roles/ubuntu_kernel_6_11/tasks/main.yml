@@ -1,0 +1,179 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+---
+# tasks/main.yml
+# Main tasks file for ubuntu_kernel_6_11 role
+
+# - name: Check if Ubuntu 24.04 is running
+#   fail:
+#     msg: "This role is designed for Ubuntu 24.04 only"
+#   when:
+#     - kernel_validate_arch
+#     - (ansible_distribution != "Ubuntu" or ansible_distribution_version != "24.04")
+
+- name: Create temporary directory for kernel packages
+  file:
+    path: "{{ kernel_temp_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Get current CPU architecture
+  set_fact:
+    download_arch: "{% if ansible_architecture == 'x86_64' %}amd64{% elif ansible_architecture == 'aarch64' %}arm64{% else %}{{ ansible_architecture }}{% endif %}"
+
+- name: Set full kernel version
+  set_fact:
+    full_kernel_version: "{{ kernel_version }}-{{ kernel_build }}"
+
+# - name: Check if kernel is already installed
+#   shell: dpkg-query -W -f='${Status}' "linux-image-unsigned-{{ full_kernel_version }}-generic" 2>/dev/null | grep -c "install ok installed" || echo 0
+#   register: kernel_already_installed
+#   changed_when: false
+#   failed_when: false
+
+- name: Download common kernel header package
+  get_url:
+    url: "{{ kernel_base_url }}/amd64/linux-headers-{{ full_kernel_version }}_{{ full_kernel_version }}.{{ kernel_timestamp }}_all.deb"
+    dest: "{{ kernel_temp_dir }}/linux-headers-{{ full_kernel_version }}_{{ full_kernel_version }}.{{ kernel_timestamp }}_all.deb"
+    mode: '0644'
+  register: download_headers_all
+
+- name: Debug common headers download
+  debug:
+    msg: "Download status: {{ download_headers_all }}"
+
+- name: List temp directory after common headers download
+  shell: "ls -la {{ kernel_temp_dir }}"
+  register: dir_listing1
+
+- name: Show directory contents
+  debug:
+    msg: "{{ dir_listing1.stdout_lines }}"
+
+- name: Download architecture-specific kernel headers package
+  get_url:
+    url: "{{ kernel_base_url }}/amd64/linux-headers-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb"
+    dest: "{{ kernel_temp_dir }}/linux-headers-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb"
+    mode: '0644'
+  register: download_headers_arch
+
+- name: Debug arch headers download
+  debug:
+    msg: "Download status: {{ download_headers_arch }}"
+
+- name: Download kernel image package
+  get_url:
+    url: "{{ kernel_base_url }}/amd64/linux-image-unsigned-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb"
+    dest: "{{ kernel_temp_dir }}/linux-image-unsigned-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb"
+    mode: '0644'
+  register: download_image
+
+- name: Debug image download
+  debug:
+    msg: "Download status: {{ download_image }}"
+
+- name: Download kernel modules package
+  get_url:
+    url: "{{ kernel_base_url }}/amd64/linux-modules-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb"
+    dest: "{{ kernel_temp_dir }}/linux-modules-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb"
+    mode: '0644'
+  register: download_modules
+
+- name: Debug modules download
+  debug:
+    msg: "Download status: {{ download_modules }}"
+  # when: kernel_already_installed.stdout == "0"
+
+- name: Check if all required files exist
+  shell: |
+    missing_files=0
+    for file in \
+      "{{ kernel_temp_dir }}/linux-headers-{{ full_kernel_version }}_{{ full_kernel_version }}.{{ kernel_timestamp }}_all.deb" \
+      "{{ kernel_temp_dir }}/linux-headers-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb" \
+      "{{ kernel_temp_dir }}/linux-image-unsigned-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb" \
+      "{{ kernel_temp_dir }}/linux-modules-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb"
+    do
+      if [ ! -f "$file" ]; then
+        echo "Missing file: $file"
+        missing_files=1
+      fi
+    done
+    exit $missing_files
+  register: file_check
+  changed_when: false
+  failed_when: file_check.rc != 0
+
+- name: Install kernel packages with dpkg
+  shell: |
+    dpkg -i \
+      "{{ kernel_temp_dir }}/linux-headers-{{ full_kernel_version }}_{{ full_kernel_version }}.{{ kernel_timestamp }}_all.deb" \
+      "{{ kernel_temp_dir }}/linux-headers-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb" \
+      "{{ kernel_temp_dir }}/linux-image-unsigned-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb" \
+      "{{ kernel_temp_dir }}/linux-modules-{{ full_kernel_version }}-generic_{{ full_kernel_version }}.{{ kernel_timestamp }}_{{ download_arch }}.deb"
+  register: kernel_installation
+  become: yes
+
+- name: Create verification file
+  copy:
+    content: "Kernel {{ full_kernel_version }} installed on {{ ansible_date_time.iso8601 }}\nHost: {{ ansible_hostname }}\nArchitecture: {{ ansible_architecture }}"
+    dest: "/var/log/kernel_6.11_installed"
+    mode: '0644'
+  when:
+    - kernel_create_verify_file
+    - kernel_installation is defined
+    - kernel_installation.changed
+
+- name: Clean up temporary files
+  file:
+    path: "{{ kernel_temp_dir }}"
+    state: absent
+  when:
+    - kernel_cleanup
+    - kernel_installation is defined
+
+- name: Reboot the system if enabled
+  reboot:
+    msg: "Rebooting to apply kernel 6.11"
+    connect_timeout: 5
+    reboot_timeout: "{{ kernel_reboot_timeout }}"
+    pre_reboot_delay: 0
+    post_reboot_delay: 30
+    test_command: uptime
+  when:
+    - kernel_reboot
+    - kernel_installation is defined
+    - kernel_installation.changed
+
+- name: Inform about manual reboot requirement
+  debug:
+    msg: |
+      Kernel 6.11 ({{ full_kernel_version }}) has been installed.
+      Please reboot the system manually to boot into the new kernel.
+      After reboot, verify the kernel version with: uname -r
+  when:
+    - not kernel_reboot
+    - kernel_installation is defined
+    - kernel_installation.changed
+
+- name: Show current kernel version
+  debug:
+    msg: "Current kernel version: {{ ansible_kernel }}"

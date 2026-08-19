@@ -1,0 +1,77 @@
+{{/*
+Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/}}
+
+{{- /*
+  CronJob template for quota auto-refresh.
+  Iterates over custom.quota.refreshRules and creates a CronJob for each enabled rule.
+*/}}
+{{- $root := . -}}
+{{- if .Values.custom.quota.refreshRules }}
+{{- range $ruleName, $rule := .Values.custom.quota.refreshRules }}
+{{- if $rule.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "jupyterhub.hub.fullname" $root }}-quota-{{ $ruleName }}
+  labels:
+    {{- include "jupyterhub.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: quota-refresh
+    quota-refresh-rule: {{ $ruleName }}
+spec:
+  schedule: {{ $rule.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "jupyterhub.labels" $root | nindent 12 }}
+            app.kubernetes.io/component: quota-refresh
+            quota-refresh-rule: {{ $ruleName }}
+            hub.jupyter.org/network-access-hub: "true"
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: quota-refresh
+            image: curlimages/curl:8.5.0
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Running quota refresh rule: {{ $ruleName }} (action: {{ $rule.action | default "add" }})"
+              curl -sf -X POST "http://{{ include "jupyterhub.hub.fullname" $root }}:8081/hub/admin/api/quota/refresh" \
+                -H "Authorization: token ${JUPYTERHUB_API_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d '{{ dict "rule_name" $ruleName "action" ($rule.action | default "add") "amount" ($rule.amount | default 100) "max_balance" $rule.maxBalance "min_balance" $rule.minBalance "targets" ($rule.targets | default dict) | toJson }}' \
+                && echo "Quota refresh completed successfully"
+            env:
+            - name: JUPYTERHUB_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "jupyterhub.hub.fullname" $root }}
+                  key: hub.services.quota-refresh.apiToken
+                  optional: false
+{{- end }}
+{{- end }}
+{{- end }}

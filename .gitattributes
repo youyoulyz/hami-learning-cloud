@@ -1,0 +1,92 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Auto detect text files and normalize line endings to LF on checkin
+* text=auto eol=lf
+
+# Python source files
+*.pxd    text diff=python
+*.py     text diff=python
+*.py3    text diff=python
+*.pyw    text diff=python
+*.pyx    text diff=python
+*.pyz    text diff=python
+*.pyi    text diff=python
+
+# JavaScript/TypeScript
+*.js     text eol=lf
+*.jsx    text eol=lf
+*.ts     text eol=lf
+*.tsx    text eol=lf
+*.vue    text eol=lf
+*.json   text eol=lf
+*.mjs    text eol=lf
+*.cjs    text eol=lf
+
+# YAML/Config
+*.yaml   text eol=lf
+*.yml    text eol=lf
+*.toml   text eol=lf
+*.ini    text eol=lf
+*.cfg    text eol=lf
+
+# Shell scripts
+*.sh     text eol=lf
+*.bash   text eol=lf
+
+# Documentation
+*.md     text eol=lf diff=markdown
+*.rst    text eol=lf
+*.txt    text eol=lf
+
+# Jupyter notebooks
+*.ipynb  text eol=lf
+
+# Git config files
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+.gitmodules     text eol=lf
+
+# Python binary files
+*.db     binary
+*.p      binary
+*.pkl    binary
+*.pickle binary
+*.pyc    binary export-ignore
+*.pyo    binary export-ignore
+*.pyd    binary
+
+# Images
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.svg    binary
+
+# Archives
+*.zip    binary
+*.tar    binary
+*.gz     binary
+*.tgz    binary
+*.bz2    binary
+*.7z     binary
+
+# PDFs
+*.pdf    binary

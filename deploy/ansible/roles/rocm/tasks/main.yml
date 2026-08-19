@@ -1,0 +1,77 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+---
+- name: Update apt cache
+  apt:
+    update_cache: yes
+
+- name: Install kernel headers and modules
+  apt:
+    name:
+      - "linux-headers-{{ ansible_kernel }}"
+      - "linux-modules-extra-{{ ansible_kernel }}"
+    state: present
+
+- name: Install Python setuptools and wheel
+  apt:
+    name:
+      - python3-setuptools
+      - python3-wheel
+    state: present
+
+- name: Download AMDGPU installer
+  get_url:
+    url: https://repo.radeon.com/amdgpu-install/31.30/ubuntu/noble/amdgpu-install_31.30.313000-1_all.deb
+    dest: /tmp/amdgpu-install_31.30.313000-1_all.deb
+
+- name: Install AMDGPU installer
+  apt:
+    deb: /tmp/amdgpu-install_31.30.313000-1_all.deb
+
+- name: Update apt cache again
+  apt:
+    update_cache: yes
+
+- name: Install AMD GPU DKMS driver
+  apt:
+    name: amdgpu-dkms
+    state: present
+
+- name: Ensure render group exists with consistent GID
+  group:
+    name: render
+    gid: 993
+    state: present
+
+- name: Set udev rules for ROCm devices with correct permissions
+  copy:
+    content: |
+      # ROCm device permissions
+      # Grant render group access to AMD GPU devices
+      # Reference: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/prerequisites.html#using-udev-rules
+      KERNEL=="kfd", GROUP="render", MODE="0660"
+      SUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0660"
+    dest: /etc/udev/rules.d/70-amdgpu.rules
+    mode: '0644'
+  register: udev_rules_changed
+
+- name: Reload udev rules if changed
+  shell: udevadm control --reload-rules && udevadm trigger
+  when: udev_rules_changed.changed

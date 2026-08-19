@@ -1,0 +1,104 @@
+{{/*
+Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/}}
+
+{{- $enabled := .Values.proxy.https.enabled -}}
+{{- $autoHTTPS := and $enabled (and (eq .Values.proxy.https.type "letsencrypt") .Values.proxy.https.hosts) -}}
+{{- $manualHTTPS := and $enabled (eq .Values.proxy.https.type "manual") -}}
+{{- $manualHTTPSwithsecret := and $enabled (eq .Values.proxy.https.type "secret") -}}
+{{- $offloadHTTPS := and $enabled (eq .Values.proxy.https.type "offload") -}}
+{{- $valid := or $autoHTTPS (or $manualHTTPS (or $manualHTTPSwithsecret $offloadHTTPS)) -}}
+{{- $HTTPS := and $enabled $valid -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "jupyterhub.proxy-api.fullname" . }}
+  labels:
+    {{- $_ := merge (dict "componentSuffix" "-api") . }}
+    {{- include "jupyterhub.labels" $_ | nindent 4 }}
+spec:
+  selector:
+    {{- include "jupyterhub.matchLabels" . | nindent 4 }}
+  ports:
+    - port: 8001
+      targetPort: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "jupyterhub.proxy-public.fullname" . }}
+  labels:
+    {{- $_ := merge (dict "componentSuffix" "-public") . }}
+    {{- include "jupyterhub.labels" $_ | nindent 4 }}
+    {{- with .Values.proxy.service.labels }}
+    {{- . | toYaml | nindent 4 }}
+    {{- end }}
+  {{- with .Values.proxy.service.annotations }}
+  annotations:
+    {{- . | toYaml | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    # This service will target the autohttps pod if autohttps is configured, and
+    # the proxy pod if not. When autohttps is configured, the service proxy-http
+    # will be around to target the proxy pod directly.
+    {{- if $autoHTTPS }}
+    {{- $_ := merge (dict "componentLabel" "autohttps") . -}}
+    {{- include "jupyterhub.matchLabels" $_ | nindent 4 }}
+    {{- else }}
+    {{- include "jupyterhub.matchLabels" . | nindent 4 }}
+    {{- end }}
+  ports:
+    {{- if $HTTPS }}
+    - name: https
+      port: {{ .Values.proxy.service.loadBalancerPort.https | default 443 }}
+      # When HTTPS termination is handled outside our helm chart, pass traffic
+      # coming in via this Service's port 443 to targeted pod's port meant for
+      # HTTP traffic.
+      {{- if $offloadHTTPS }}
+      targetPort: http
+      {{- else }}
+      targetPort: https
+      {{- end }}
+      {{- with .Values.proxy.service.nodePorts.https }}
+      nodePort: {{ . }}
+      {{- end }}
+    {{- end }}
+    {{- if ne .Values.proxy.service.disableHttpPort true }}
+    - name: http
+      port: {{ .Values.proxy.service.loadBalancerPort.http | default 80 }}
+      targetPort: http
+      {{- with .Values.proxy.service.nodePorts.http }}
+      nodePort: {{ . }}
+      {{- end }}
+    {{- end }}
+    {{- with .Values.proxy.service.extraPorts }}
+    {{- . | toYaml | nindent 4 }}
+    {{- end }}
+  type: {{ .Values.proxy.service.type }}
+  {{- with .Values.proxy.service.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- if eq .Values.proxy.service.type "LoadBalancer" }}
+  {{- with .Values.proxy.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- . | toYaml | nindent 4 }}
+  {{- end }}
+  {{- end }}

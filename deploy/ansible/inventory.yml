@@ -1,0 +1,72 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+---
+k3s_cluster:
+  children:
+    server:
+      hosts:
+        # suggested: aup-SHC1-395-1
+        # You need to config the hostname in /etc/hosts
+        <YOUR-SERVER-HOSTNAME>:
+    agent:
+      hosts:
+        <YOUR-AGENT-HOSTNAME>:
+        # strix-5:
+        # phx-1:
+        # phx-64g:
+
+  # Required Vars
+  vars:
+    ansible_port: 22
+    # Make sure this user has root access and can be accessed without a password.
+    ansible_user: root
+    k3s_version: v1.32.3+k3s1
+    # The token should be a random string of reasonable length. You can generate
+    # one with the following commands:
+    # - openssl rand -base64 64
+    # - pwgen -s 64 1
+    # You can use ansible-vault to encrypt this value / keep it secret.
+    # Or you can omit it if not using Vagrant and let the first server automatically generate one.
+    token: "YouShouldChangeThisSecretBeforeDeployment"
+    api_endpoint: "{{ hostvars[groups['server'][0]]['ansible_host'] | default(groups['server'][0]) }}"
+
+    # Optional vars
+    # extra_server_args: ""
+    # extra_agent_args: ""
+    # cluster_context: k3s-ansible
+    # api_port: 6443
+    # k3s_server_location: /var/lib/rancher/k3s
+    # systemd_dir: /etc/systemd/system
+    # extra_service_envs: [ 'ENV_VAR1=VALUE1', 'ENV_VAR2=VALUE2' ]
+    # user_kubectl: true, by default kubectl is symlinked and configured for use by ansible_user. Set to false to only kubectl via root user.
+
+    # Manifests or Airgap should be either full paths or relative to the playbook directory.
+    # List of locally available manifests to apply to the cluster, useful for PVCs or Traefik modifications.
+    # extra_manifests: [ '/path/to/manifest1.yaml', '/path/to/manifest2.yaml' ]
+    # airgap_dir: /tmp/k3s-airgap-images
+
+    # server_config_yaml:  |
+    #   This is now an inner yaml file. Maintain the indentation.
+    #   YAML here will be placed as the content of /etc/rancher/k3s/config.yaml
+    #   See https://docs.k3s.io/installation/configuration#configuration-file
+    # registries_config_yaml:  |
+    #   Containerd can be configured to connect to private registries and use them to pull images as needed by the kubelet.
+    #   YAML here will be placed as the content of /etc/rancher/k3s/registries.yaml
+    #   See https://docs.k3s.io/installation/private-registry

@@ -1,0 +1,155 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Original file from [k3s-ansible/https://github.com/k3s-io/k3s-ansible/tree/master]
+# Copyright [https://github.com/itwars]
+# Licensed under Apache License 2.0
+# Modified by [Kerwin Tsai/ADM Research]
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
+# Modifications:
+# - Removed platform-specific checks for RedHat, Archlinux and Suse only for Ubuntu
+# - Modified UFW rule conditions to use exact string matching
+# - Added new task for opening inter-node ports in UFW
+# - Renamed "Setup alternative K3s directory" to "Setup K3s directory"
+
+---
+- name: Enforce minimum Ansible version
+  ansible.builtin.assert:
+    that:
+      - ansible_version.full is version('2.14', '>=')
+    msg: "Minimum ansible-core version required is 2.14"
+
+- name: Install Dependent Ubuntu Packages
+  ansible.builtin.apt:
+    name: policycoreutils  # Used by install script to restore SELinux context
+    update_cache: true
+
+- name: Enable IPv4 forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    state: present
+    reload: true
+
+- name: Enable IPv6 forwarding
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.all.forwarding
+    value: "1"
+    state: present
+    reload: true
+  when: (ansible_all_ipv6_addresses | default([])) | length > 0
+
+- name: Populate service facts
+  ansible.builtin.service_facts:
+
+- name: Allow UFW Exceptions
+  when:
+    - ansible_facts.services['ufw'] is defined
+    - ansible_facts.services['ufw'].state == 'running'
+  block:
+    - name: Get ufw status
+      ansible.builtin.command:
+        cmd: ufw status
+      changed_when: false
+      register: ufw_status
+
+    - name: If ufw enabled, open api port
+      when:
+        - ufw_status['stdout'] == "Status':' active"
+      community.general.ufw:
+        rule: allow
+        port: "{{ api_port }}"
+        proto: tcp
+
+    - name: If ufw enabled, open etcd ports
+      when:
+        - ufw_status['stdout'] == "Status':' active"
+        - groups[server_group] | length > 1
+      community.general.ufw:
+        rule: allow
+        port: "2379:2381"
+        proto: tcp
+
+    - name: If ufw enabled, allow default CIDRs
+      when:
+        - ufw_status['stdout'] == "Status':' active"
+      community.general.ufw:
+        rule: allow
+        src: '{{ item }}'
+      loop: "{{ (cluster_cidr + ',' + service_cidr) | split(',') }}"
+
+    - name: If ufw enabled, open inter-node ports
+      when:
+        - ufw_status['stdout'] == "Status':' active"
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: "{{ item.split('/')[1] }}"
+      with_items:
+        - "5001/tcp"   # Spegel (Embedded distributed registry)
+        - "8472/udp"   # Flannel VXLAN
+        - "10250/tcp"  # Kubelet metrics
+        - "51820/udp"  # Flannel Wireguard (IPv4)
+        - "51821/udp"  # Flannel Wireguard (IPv6)"
+
+- name: Setup K3s directory
+  when:
+    - k3s_server_location is defined
+    - k3s_server_location != "/var/lib/rancher/k3s"
+  block:
+    - name: Make rancher directory
+      ansible.builtin.file:
+        path: "/var/lib/rancher"
+        mode: "0755"
+        state: directory
+    - name: Create symlink
+      ansible.builtin.file:
+        dest: /var/lib/rancher/k3s
+        src: "{{ k3s_server_location }}"
+        force: true
+        state: link
+
+- name: Setup extra manifests
+  when: extra_manifests is defined
+  block:
+    - name: Make manifests directory
+      ansible.builtin.file:
+        path: "/var/lib/rancher/k3s/server/manifests"
+        mode: "0700"
+        state: directory
+    - name: Copy manifests
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/var/lib/rancher/k3s/server/manifests"
+        mode: "0600"
+      loop: "{{ extra_manifests }}"
+
+- name: Setup optional private registry configuration
+  when: registries_config_yaml is defined
+  block:
+    - name: Make k3s config directory
+      ansible.builtin.file:
+        path: "/etc/rancher/k3s"
+        mode: "0755"
+        state: directory
+    - name: Copy config values
+      ansible.builtin.copy:
+        content: "{{ registries_config_yaml }}"
+        dest: "/etc/rancher/k3s/registries.yaml"
+        mode: "0644"

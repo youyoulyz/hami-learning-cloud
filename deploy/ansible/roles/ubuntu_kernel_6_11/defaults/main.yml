@@ -1,0 +1,52 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+---
+# defaults/main.yml
+# Default variables for the ubuntu_kernel_6_11 role
+
+# Temporary directory to store kernel packages
+kernel_temp_dir: "/tmp/kernel-6.11"
+
+# Kernel version to install
+kernel_version: "6.11.0"
+
+# Kernel build number
+kernel_build: "061100"
+
+# Package timestamp
+kernel_timestamp: "202409151536"
+
+# Whether to automatically reboot after installation
+kernel_reboot: false
+
+# Whether to validate architecture compatibility
+kernel_validate_arch: true
+
+# Whether to clean up downloaded packages after installation
+kernel_cleanup: true
+
+# Whether to create installation verification file
+kernel_create_verify_file: true
+
+# Timeout for reboot operation in seconds
+kernel_reboot_timeout: 600
+
+# Base URL for kernel packages
+kernel_base_url: "https://kernel.ubuntu.com/~kernel-ppa/mainline/v6.11"

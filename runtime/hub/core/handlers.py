@@ -1,0 +1,1716 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""
+HTTP Handlers for JupyterHub
+
+Provides custom handlers for:
+- Password management
+- Admin UI
+- Quota management API
+- Accelerator configuration API
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import urlencode, urlparse, urlunparse
+
+from jupyterhub.apihandlers import APIHandler
+from jupyterhub.handlers import BaseHandler
+from multiauthenticator import MultiAuthenticator
+from pydantic import ValidationError
+from tornado import web
+
+from core.authenticators import GITHUB_USERNAME_PREFIX, CustomFirstUseAuthenticator
+from core.git_validation import validate_and_sanitize_repo_url
+from core.notifications import get_normalized_notifications
+from core.quota import (
+    BatchQuotaRequest,
+    QuotaAction,
+    QuotaModifyRequest,
+    QuotaRefreshRequest,
+    get_quota_manager,
+)
+from core.stats_handlers import (
+    StatsActiveSSEHandler,
+    StatsDistributionHandler,
+    StatsHourlyHandler,
+    StatsMyUsageHandler,
+    StatsOverviewHandler,
+    StatsUsageHandler,
+    StatsUserHandler,
+)
+
+# =============================================================================
+# Module-level configuration (set via configure_handlers)
+# =============================================================================
+
+_handler_config: dict[str, Any] = {
+    "accelerator_options": {},
+    "quota_rates": {},
+    "quota_enabled": False,
+    "minimum_quota_to_start": 10,
+    "default_quota": 0,
+    "team_resource_mapping": {},
+    "auth_mode": "auto-login",
+    "platform_name": "AUP Learning Cloud",
+}
+
+
+def _serialize_dismissed_at(value: datetime | None) -> str | None:
+    """Serialize onboarding dismissal timestamps for API responses."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
+def _get_onboarding_state(username: str) -> datetime | None:
+    """Fetch onboarding dismissal time for a username."""
+    from core.authenticators.models import UserOnboardingState
+    from core.database import session_scope
+
+    with session_scope() as db:
+        state = db.query(UserOnboardingState).filter_by(username=username).first()
+        return state.dismissed_at if state is not None else None
+
+
+def _dismiss_onboarding(username: str) -> str:
+    """Persist dismissal state for a username."""
+    from core.authenticators.models import UserOnboardingState
+    from core.database import session_scope
+
+    dismissed_at = datetime.now(timezone.utc)
+
+    with session_scope() as db:
+        state = db.query(UserOnboardingState).filter_by(username=username).first()
+        if state is None:
+            state = UserOnboardingState(username=username)
+            db.add(state)
+        state.dismissed_at = dismissed_at
+
+    return _serialize_dismissed_at(dismissed_at) or ""
+
+
+def configure_handlers(
+    accelerator_options: dict[str, Any] | None = None,
+    quota_rates: dict[str, int] | None = None,
+    quota_enabled: bool = False,
+    minimum_quota_to_start: int = 10,
+    default_quota: int = 0,
+    team_resource_mapping: dict[str, list[str]] | None = None,
+    github_org: str = "",
+    auth_mode: str = "auto-login",
+    platform_name: str = "AUP Learning Cloud",
+) -> None:
+    """Configure handler module with runtime settings."""
+    if accelerator_options is not None:
+        _handler_config["accelerator_options"] = accelerator_options
+    if quota_rates is not None:
+        _handler_config["quota_rates"] = quota_rates
+    _handler_config["quota_enabled"] = quota_enabled
+    _handler_config["minimum_quota_to_start"] = minimum_quota_to_start
+    _handler_config["default_quota"] = default_quota
+    if team_resource_mapping is not None:
+        _handler_config["team_resource_mapping"] = team_resource_mapping
+    _handler_config["github_org"] = github_org
+    _handler_config["auth_mode"] = auth_mode
+    _handler_config["platform_name"] = platform_name
+
+
+# =============================================================================
+# Onboarding Handlers
+# =============================================================================
+
+
+class GetMyOnboardingHandler(APIHandler):
+    """Return onboarding visibility for the current user."""
+
+    @web.authenticated
+    async def get(self):
+        assert self.current_user is not None
+
+        dismissed_at = _get_onboarding_state(self.current_user.name)
+
+        self.set_header("Content-Type", "application/json")
+        self.finish(
+            json.dumps(
+                {
+                    "should_show": dismissed_at is None,
+                    "dismissed_at": _serialize_dismissed_at(dismissed_at),
+                }
+            )
+        )
+
+
+class DismissMyOnboardingHandler(APIHandler):
+    """Persist onboarding dismissal for the current user."""
+
+    @web.authenticated
+    async def post(self):
+        assert self.current_user is not None
+
+        dismissed_at = _dismiss_onboarding(self.current_user.name)
+
+        self.set_header("Content-Type", "application/json")
+        self.finish(
+            json.dumps(
+                {
+                    "should_show": False,
+                    "dismissed_at": dismissed_at,
+                }
+            )
+        )
+
+
+# =============================================================================
+# Password Management Handlers
+# =============================================================================
+
+
+class CheckForcePasswordChangeHandler(BaseHandler):
+    """API endpoint to check if user needs to change password."""
+
+    @web.authenticated
+    async def get(self):
+        """Check if user needs forced password change."""
+        assert self.current_user is not None
+        user = self.current_user
+        username = user.name
+
+        if ":" in username:
+            username = username.split(":", 1)[1]
+
+        needs_change = False
+        if isinstance(self.authenticator, MultiAuthenticator):
+            for authenticator in self.authenticator._authenticators:
+                if isinstance(authenticator, CustomFirstUseAuthenticator):
+                    needs_change = authenticator.needs_password_change(username)
+                    break
+
+        self.set_header("Content-Type", "application/json")
+        self.finish(json.dumps({"needs_password_change": needs_change}))
+
+
+class ChangePasswordHandler(BaseHandler):
+    """Allow users to change their password."""
+
+    @web.authenticated
+    async def get(self):
+        """Show password change form."""
+        assert self.current_user is not None
+        password_changed = self.get_argument("password_changed", default="") != ""
+        forced = self.get_argument("forced", default="") != ""
+
+        user = self.current_user
+        username = user.name
+        if ":" in username:
+            username = username.split(":", 1)[1]
+
+        is_forced = False
+        if isinstance(self.authenticator, MultiAuthenticator):
+            for authenticator in self.authenticator._authenticators:
+                if isinstance(authenticator, CustomFirstUseAuthenticator):
+                    is_forced = authenticator.needs_password_change(username)
+                    break
+
+        html = await self.render_template(
+            "change-password.html", password_changed=password_changed, forced_change=is_forced or forced
+        )
+        self.finish(html)
+
+    @web.authenticated
+    async def post(self):
+        """Process password change."""
+        assert self.current_user is not None
+        user = self.current_user
+        current_password = self.get_body_argument("current_password", default=None)
+        new_password = self.get_body_argument("new_password", default=None)
+        confirm_password = self.get_body_argument("confirm_password", default=None)
+
+        def _render_error(msg: str):
+            return self.render_template(
+                "change-password.html",
+                password_changed=False,
+                forced_change=False,
+                error_message=msg,
+            )
+
+        if not all([current_password, new_password, confirm_password]):
+            html = await _render_error("All fields are required")
+            self.set_status(400)
+            return self.finish(html)
+
+        if new_password != confirm_password:
+            html = await _render_error("New passwords do not match")
+            self.set_status(400)
+            return self.finish(html)
+
+        username = user.name
+        if username.startswith(GITHUB_USERNAME_PREFIX):
+            html = await _render_error("GitHub users cannot change password here")
+            self.set_status(400)
+            return self.finish(html)
+
+        firstuse_auth = None
+        if isinstance(self.authenticator, MultiAuthenticator):
+            for authenticator in self.authenticator._authenticators:
+                if isinstance(authenticator, CustomFirstUseAuthenticator):
+                    firstuse_auth = authenticator
+                    break
+
+        if not firstuse_auth:
+            html = await _render_error("Password change not available")
+            self.set_status(500)
+            return self.finish(html)
+
+        auth_result = await firstuse_auth.authenticate(self, {"username": username, "password": current_password})
+
+        if not auth_result:
+            html = await _render_error("Current password is incorrect")
+            self.set_status(403)
+            return self.finish(html)
+
+        try:
+            result = firstuse_auth.set_password(username, new_password, force_change=False)
+            if not result.startswith("Password set for"):
+                html = await _render_error(result)
+                self.set_status(400)
+                return self.finish(html)
+            self.redirect(self.hub.base_url + "auth/change-password?password_changed=1")
+        except Exception as e:
+            self.log.error(f"Failed to change password for {username}: {e}")
+            html = await _render_error("Failed to change password")
+            self.set_status(500)
+            self.finish(html)
+
+
+class AdminResetPasswordHandler(BaseHandler):
+    """Allow admins to reset passwords for native/local users."""
+
+    @web.authenticated
+    async def get(self):
+        """Show admin password reset form."""
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            self.set_status(403)
+            return self.finish("Admin access required")
+
+        target_user = self.get_argument("user", default="")
+        success = self.get_argument("success", default="") != ""
+        error = self.get_argument("error", default="")
+
+        native_users = []
+        from jupyterhub.orm import User
+
+        for user in self.db.query(User).all():
+            if not user.name.startswith(GITHUB_USERNAME_PREFIX) and user.name != "admin":
+                native_users.append(user.name)
+
+        html = await self.render_template(
+            "admin-reset-password.html",
+            native_users=sorted(native_users),
+            target_user=target_user,
+            success=success,
+            error=error,
+        )
+        self.finish(html)
+
+    @web.authenticated
+    async def post(self):
+        """Process admin password reset."""
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            self.set_status(403)
+            return self.finish("Admin access required")
+
+        target_user = self.get_body_argument("target_user", default=None)
+        new_password = self.get_body_argument("new_password", default=None)
+        confirm_password = self.get_body_argument("confirm_password", default=None)
+        force_change = self.get_body_argument("force_change", default="on") == "on"
+
+        if not target_user or not new_password or not confirm_password:
+            return self.redirect(self.hub.base_url + "admin/reset-password?error=All+fields+are+required")
+
+        if new_password != confirm_password:
+            return self.redirect(
+                self.hub.base_url + f"admin/reset-password?user={target_user}&error=Passwords+do+not+match"
+            )
+
+        username = target_user
+        if username.startswith(GITHUB_USERNAME_PREFIX):
+            return self.redirect(
+                self.hub.base_url
+                + f"admin/reset-password?user={target_user}&error=Cannot+reset+password+for+GitHub+users"
+            )
+
+        firstuse_auth = None
+        if isinstance(self.authenticator, MultiAuthenticator):
+            for authenticator in self.authenticator._authenticators:
+                if isinstance(authenticator, CustomFirstUseAuthenticator):
+                    firstuse_auth = authenticator
+                    break
+
+        if not firstuse_auth:
+            return self.redirect(self.hub.base_url + "admin/reset-password?error=Password+reset+not+available")
+
+        try:
+            result = firstuse_auth.set_password(username, new_password, force_change=force_change)
+            if not result.startswith("Password set for"):
+                from urllib.parse import quote_plus
+
+                return self.redirect(
+                    self.hub.base_url + f"admin/reset-password?user={target_user}&error={quote_plus(result)}"
+                )
+
+            if force_change:
+                firstuse_auth.mark_force_password_change(username, True)
+            else:
+                firstuse_auth.clear_force_password_change(username)
+
+            return self.redirect(self.hub.base_url + f"admin/reset-password?success=1&user={target_user}")
+
+        except Exception as e:
+            self.log.error(f"Failed to reset password for {target_user}: {e}")
+            return self.redirect(
+                self.hub.base_url + f"admin/reset-password?user={target_user}&error=Failed+to+reset+password"
+            )
+
+
+# =============================================================================
+# Admin UI Handlers
+# =============================================================================
+
+
+class AdminUIHandler(BaseHandler):
+    """Serve the custom admin UI (React app)."""
+
+    @web.authenticated
+    async def get(self):
+        """Serve admin UI page."""
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            self.set_status(403)
+            return self.finish("Admin access required")
+
+        html = await self.render_template("admin-ui.html")
+        self.finish(html)
+
+
+class AdminAPISetPasswordHandler(APIHandler):
+    """API endpoint for setting user passwords."""
+
+    @web.authenticated
+    async def post(self):
+        """Set password for a user."""
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            self.set_status(403)
+            self.set_header("Content-Type", "application/json")
+            return self.finish(json.dumps({"error": "Admin access required"}))
+
+        try:
+            data = json.loads(self.request.body.decode("utf-8"))
+            username = data.get("username")
+            password = data.get("password")
+            force_change = data.get("force_change", True)
+
+            if not username or not password:
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Username and password are required"}))
+
+            if username.startswith(GITHUB_USERNAME_PREFIX):
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Cannot set password for GitHub users"}))
+
+            firstuse_auth = None
+            if isinstance(self.authenticator, MultiAuthenticator):
+                for authenticator in self.authenticator._authenticators:
+                    if isinstance(authenticator, CustomFirstUseAuthenticator):
+                        firstuse_auth = authenticator
+                        break
+
+            if not firstuse_auth:
+                self.set_status(500)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Password management not available"}))
+
+            result = firstuse_auth.set_password(username, password, force_change=force_change)
+
+            if not result.startswith("Password set for"):
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": result}))
+
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"message": result}))
+
+        except json.JSONDecodeError:
+            self.set_status(400)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Invalid JSON"}))
+        except Exception as e:
+            self.log.error(f"Failed to set password: {e}")
+            self.set_status(500)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Failed to set password"}))
+
+
+class AdminAPIGeneratePasswordHandler(APIHandler):
+    """API endpoint for generating random passwords."""
+
+    @web.authenticated
+    async def get(self):
+        """Generate a random password."""
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            self.set_status(403)
+            self.set_header("Content-Type", "application/json")
+            return self.finish(json.dumps({"error": "Admin access required"}))
+
+        import secrets
+        import string
+
+        chars = string.ascii_letters + string.digits
+        chars = chars.replace("l", "").replace("I", "").replace("O", "").replace("0", "")
+        password = "".join(secrets.choice(chars) for _ in range(16))
+
+        self.set_header("Content-Type", "application/json")
+        self.finish(json.dumps({"password": password}))
+
+
+class AdminAPIBatchSetPasswordHandler(APIHandler):
+    """API endpoint for batch setting user passwords."""
+
+    @web.authenticated
+    async def post(self):
+        """Set passwords for multiple users in a single request."""
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            self.set_status(403)
+            self.set_header("Content-Type", "application/json")
+            return self.finish(json.dumps({"error": "Admin access required"}))
+
+        try:
+            data = json.loads(self.request.body.decode("utf-8"))
+            users = data.get("users", [])
+            force_change = data.get("force_change", True)
+
+            if not users or not isinstance(users, list):
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "users array is required"}))
+
+            if len(users) > 1000:
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Maximum 1000 users per batch"}))
+
+            # Validate entries
+            for entry in users:
+                if not isinstance(entry, dict) or "username" not in entry or "password" not in entry:
+                    self.set_status(400)
+                    self.set_header("Content-Type", "application/json")
+                    return self.finish(json.dumps({"error": "Each entry must have username and password"}))
+                if entry.get("username", "").startswith(GITHUB_USERNAME_PREFIX):
+                    self.set_status(400)
+                    self.set_header("Content-Type", "application/json")
+                    return self.finish(
+                        json.dumps({"error": f"Cannot set password for GitHub user: {entry['username']}"})
+                    )
+
+            firstuse_auth = None
+            if isinstance(self.authenticator, MultiAuthenticator):
+                for authenticator in self.authenticator._authenticators:
+                    if isinstance(authenticator, CustomFirstUseAuthenticator):
+                        firstuse_auth = authenticator
+                        break
+
+            if not firstuse_auth:
+                self.set_status(500)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Password management not available"}))
+
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, lambda: firstuse_auth.batch_set_passwords(users, force_change=force_change)
+            )
+
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps(result))
+
+        except json.JSONDecodeError:
+            self.set_status(400)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Invalid JSON"}))
+        except Exception as e:
+            self.log.error(f"Failed to batch set passwords: {e}")
+            self.set_status(500)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Internal server error"}))
+
+
+# =============================================================================
+# Quota Management Handlers
+# =============================================================================
+
+
+class QuotaAPIHandler(APIHandler):
+    """API endpoint for managing user quota."""
+
+    @web.authenticated
+    async def get(self, username=None):
+        """Get quota balance."""
+        assert self.current_user is not None
+
+        if username:
+            if not self.current_user.admin and self.current_user.name.lower() != username.lower():
+                self.set_status(403)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Access denied"}))
+
+            quota_manager = get_quota_manager()
+            balance = quota_manager.get_balance(username)
+            unlimited = quota_manager.is_unlimited_in_db(username)
+            transactions = quota_manager.get_user_transactions(username, 20)
+
+            self.set_header("Content-Type", "application/json")
+            self.finish(
+                json.dumps(
+                    {
+                        "username": username,
+                        "balance": balance,
+                        "unlimited": unlimited,
+                        "recent_transactions": transactions,
+                    }
+                )
+            )
+        else:
+            if not self.current_user.admin:
+                self.set_status(403)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Admin access required"}))
+
+            quota_manager = get_quota_manager()
+            balances = quota_manager.get_all_balances()
+
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"users": balances}))
+
+    @web.authenticated
+    async def post(self, username=None):
+        """Set or add quota (admin only)."""
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            self.set_status(403)
+            self.set_header("Content-Type", "application/json")
+            return self.finish(json.dumps({"error": "Admin access required"}))
+
+        try:
+            data = json.loads(self.request.body.decode("utf-8"))
+
+            try:
+                req = QuotaModifyRequest(**data)
+            except ValidationError as ve:
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                errors = [{"field": e["loc"][0] if e["loc"] else "request", "message": e["msg"]} for e in ve.errors()]
+                return self.finish(json.dumps({"error": "Validation failed", "details": errors}))
+
+            if not username:
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Username required"}))
+
+            quota_manager = get_quota_manager()
+            admin_name = self.current_user.name
+
+            if req.action == QuotaAction.SET:
+                assert req.amount is not None
+                new_balance = quota_manager.set_balance(username, req.amount, admin_name)
+            elif req.action == QuotaAction.ADD:
+                assert req.amount is not None
+                new_balance = quota_manager.add_quota(username, req.amount, req.description or "", admin_name)
+            elif req.action == QuotaAction.DEDUCT:
+                assert req.amount is not None
+                current_balance = quota_manager.get_balance(username)
+                if current_balance < req.amount:
+                    self.set_status(400)
+                    self.set_header("Content-Type", "application/json")
+                    return self.finish(json.dumps({"error": "Insufficient balance"}))
+                new_balance = quota_manager.deduct_quota(username, req.amount, req.description or "")
+            elif req.action == QuotaAction.SET_UNLIMITED:
+                assert req.unlimited is not None
+                quota_manager.set_unlimited(username, req.unlimited, admin_name)
+                new_balance = quota_manager.get_balance(username)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(
+                    json.dumps(
+                        {
+                            "username": username,
+                            "balance": new_balance,
+                            "unlimited": req.unlimited,
+                            "action": req.action.value,
+                        }
+                    )
+                )
+
+            self.set_header("Content-Type", "application/json")
+            self.finish(
+                json.dumps(
+                    {
+                        "username": username,
+                        "balance": new_balance,
+                        "action": req.action.value,
+                        "amount": req.amount,
+                    }
+                )
+            )
+
+        except json.JSONDecodeError:
+            self.set_status(400)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Invalid JSON"}))
+        except Exception as e:
+            self.log.error(f"Quota API error: {e}")
+            self.set_status(500)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Internal server error"}))
+
+
+class QuotaBatchAPIHandler(APIHandler):
+    """API endpoint for batch quota operations."""
+
+    @web.authenticated
+    async def post(self):
+        """Batch set quota for multiple users."""
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            self.set_status(403)
+            self.set_header("Content-Type", "application/json")
+            return self.finish(json.dumps({"error": "Admin access required"}))
+
+        try:
+            data = json.loads(self.request.body.decode("utf-8"))
+
+            try:
+                req = BatchQuotaRequest(**data)
+            except ValidationError as ve:
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                errors = [{"field": str(e["loc"]), "message": e["msg"]} for e in ve.errors()]
+                return self.finish(json.dumps({"error": "Validation failed", "details": errors}))
+
+            quota_manager = get_quota_manager()
+            admin_name = self.current_user.name
+
+            # Separate unlimited and regular users
+            unlimited_users = [u for u in req.users if u.unlimited is True]
+            unset_unlimited_users = [u for u in req.users if u.unlimited is False]
+            regular_users = [u for u in req.users if u.unlimited is None]
+
+            results = {"success": 0, "failed": 0, "details": []}
+
+            # Handle unlimited users
+            for user in unlimited_users:
+                try:
+                    quota_manager.set_unlimited(user.username, True, admin_name)
+                    results["success"] += 1
+                    results["details"].append({"username": user.username, "status": "success", "unlimited": True})
+                except Exception:
+                    results["failed"] += 1
+                    results["details"].append(
+                        {"username": user.username, "status": "failed", "error": "Processing error"}
+                    )
+
+            # Handle unset-unlimited users
+            for user in unset_unlimited_users:
+                try:
+                    quota_manager.set_unlimited(user.username, False, admin_name)
+                    results["success"] += 1
+                except Exception:
+                    results["failed"] += 1
+                    results["details"].append(
+                        {"username": user.username, "status": "failed", "error": "Processing error"}
+                    )
+
+            # Batch set balance for regular users + unset-unlimited users in single transaction
+            batch_users = [(u.username, u.amount) for u in regular_users + unset_unlimited_users]
+            if batch_users:
+                batch_result = quota_manager.batch_set_quota(batch_users, admin_name)
+                results["success"] += batch_result["success"]
+                results["failed"] += batch_result["failed"]
+                results["details"].extend(batch_result.get("details", []))
+
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps(results))
+
+        except json.JSONDecodeError:
+            self.set_status(400)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Invalid JSON"}))
+        except Exception as e:
+            self.log.error(f"Batch quota API error: {e}")
+            self.set_status(500)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Internal server error"}))
+
+
+class QuotaRefreshHandler(APIHandler):
+    """API endpoint for batch quota refresh."""
+
+    @web.authenticated
+    async def post(self):
+        """Refresh quota for all eligible users based on targeting rules."""
+        assert self.current_user is not None
+        is_admin = getattr(self.current_user, "admin", False)
+        if not is_admin:
+            self.set_status(403)
+            self.set_header("Content-Type", "application/json")
+            user_info = f"name={getattr(self.current_user, 'name', 'unknown')}, admin={is_admin}"
+            self.log.warning(f"[QUOTA] Refresh 403: {user_info}")
+            return self.finish(json.dumps({"error": "Admin access required"}))
+
+        try:
+            data = json.loads(self.request.body.decode("utf-8"))
+
+            try:
+                req = QuotaRefreshRequest(**data)
+            except ValidationError as ve:
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                errors = [{"field": str(e["loc"]), "message": e["msg"]} for e in ve.errors()]
+                return self.finish(json.dumps({"error": "Validation failed", "details": errors}))
+
+            self.log.info(
+                f"[QUOTA] Refresh triggered: rule={req.rule_name}, action={req.action.value}, amount={req.amount}"
+            )
+
+            quota_manager = get_quota_manager()
+            result = quota_manager.batch_refresh_quota(
+                amount=req.amount,
+                action=req.action.value,
+                max_balance=req.max_balance,
+                min_balance=req.min_balance,
+                targets=req.targets.model_dump(exclude_none=True),
+                rule_name=req.rule_name,
+            )
+
+            self.log.info(f"[QUOTA] Refresh complete: {result}")
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps(result))
+
+        except json.JSONDecodeError:
+            self.set_status(400)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Invalid JSON"}))
+        except Exception as e:
+            self.log.error(f"[QUOTA] Refresh error: {e}")
+            self.set_status(500)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Internal server error"}))
+
+
+# =============================================================================
+# Configuration API Handlers
+# =============================================================================
+
+
+class AcceleratorsAPIHandler(APIHandler):
+    """API endpoint for available accelerator options."""
+
+    @web.authenticated
+    async def get(self):
+        """Get available accelerator options."""
+        self.set_header("Content-Type", "application/json")
+        self.finish(json.dumps({"accelerators": _handler_config["accelerator_options"]}))
+
+
+class QuotaRatesAPIHandler(APIHandler):
+    """API endpoint for quota rates configuration."""
+
+    @web.authenticated
+    async def get(self):
+        """Get quota rates and configuration."""
+        self.set_header("Content-Type", "application/json")
+        self.finish(
+            json.dumps(
+                {
+                    "enabled": _handler_config["quota_enabled"],
+                    "rates": _handler_config["quota_rates"],
+                    "minimum_to_start": _handler_config["minimum_quota_to_start"],
+                    "default_quota": _handler_config["default_quota"],
+                }
+            )
+        )
+
+
+class UserQuotaInfoHandler(APIHandler):
+    """API endpoint for current user's quota info (non-admin)."""
+
+    @web.authenticated
+    async def get(self):
+        """Get current user's quota balance and rates."""
+        assert self.current_user is not None
+
+        username = self.current_user.name
+
+        if not _handler_config.get("quota_enabled"):
+            self.set_header("Content-Type", "application/json")
+            self.finish(
+                json.dumps(
+                    {
+                        "username": username,
+                        "balance": 0,
+                        "unlimited": True,
+                        "rates": _handler_config["quota_rates"],
+                        "enabled": False,
+                    }
+                )
+            )
+            return
+
+        quota_manager = get_quota_manager()
+        balance = quota_manager.ensure_user_quota(username, _handler_config["default_quota"])
+        has_unlimited = quota_manager.is_unlimited_in_db(username)
+
+        self.set_header("Content-Type", "application/json")
+        self.finish(
+            json.dumps(
+                {
+                    "username": username,
+                    "balance": balance,
+                    "unlimited": has_unlimited,
+                    "rates": _handler_config["quota_rates"],
+                    "enabled": True,
+                }
+            )
+        )
+
+
+class ResourcesAPIHandler(APIHandler):
+    """API endpoint for current user's available resources with metadata."""
+
+    @web.authenticated
+    async def get(self):
+        """Get resources visible to the current user with metadata."""
+        from core.config import HubConfig
+        from core.groups import resolve_resources_for_user
+
+        assert self.current_user is not None
+        config = HubConfig.get()
+
+        available_resources = set(
+            resolve_resources_for_user(
+                self.current_user,
+                _handler_config.get("team_resource_mapping", {}),
+                _handler_config.get("auth_mode", "auto-login"),
+                list(config.resources.images.keys()),
+            )
+        )
+
+        # Build response
+        resources_list = []
+        groups_dict: dict[str, list[dict]] = {}
+
+        for key in sorted(available_resources):
+            image = config.get_resource_image(key)
+            requirements = config.get_resource_requirements(key)
+            metadata = config.get_resource_metadata(key)
+
+            if not image:
+                continue
+
+            resource_data: dict[str, Any] = {
+                "key": key,
+                "image": image,
+                "requirements": requirements.model_dump(by_alias=True, exclude_none=True)
+                if requirements
+                else {"cpu": "2", "memory": "4Gi"},
+            }
+
+            if metadata:
+                resource_data["metadata"] = metadata.model_dump(exclude_none=True)
+                group_name = metadata.group or "OTHERS"
+            else:
+                # Fallback: derive a human-readable description from the resource key
+                readable = key.replace("-", " ").replace("_", " ")
+                resource_data["metadata"] = {
+                    "group": "OTHERS",
+                    "description": readable,
+                    "subDescription": "",
+                }
+                group_name = "OTHERS"
+
+            resources_list.append(resource_data)
+
+            if group_name not in groups_dict:
+                groups_dict[group_name] = []
+            groups_dict[group_name].append(resource_data)
+
+        # Build groups list. Configured groups come first; unspecified groups
+        # keep the legacy alphabetical order with low-priority groups last.
+        BOTTOM_GROUPS = {"OTHERS", "CUSTOM REPO"}
+        groups_list = []
+        configured_group_order = {group_name: index for index, group_name in enumerate(config.resources.groupOrder)}
+
+        def group_sort_key(group_name: str) -> tuple[int, int, bool, str]:
+            if group_name in configured_group_order:
+                return (0, configured_group_order[group_name], False, group_name)
+            return (1, 0, group_name in BOTTOM_GROUPS, group_name)
+
+        sorted_group_names = sorted(groups_dict.keys(), key=group_sort_key)
+        for group_name in sorted_group_names:
+            groups_list.append(
+                {
+                    "name": group_name,
+                    "displayName": group_name.replace("_", " ").title(),
+                    "resources": groups_dict[group_name],
+                }
+            )
+
+        self.set_header("Content-Type", "application/json")
+        self.finish(
+            json.dumps(
+                {
+                    "resources": resources_list,
+                    "groups": groups_list,
+                    "acceleratorKeys": list(config.accelerators.keys()),
+                    "allowedGitProviders": list(config.git_clone.allowedProviders),
+                    "githubAppName": config.git_clone.githubAppName,
+                    "allowPersistenceChoice": config.git_clone.allowPersistenceChoice,
+                    "defaultPersistence": config.git_clone.defaultPersistence,
+                }
+            )
+        )
+
+
+class GitSpawnHandler(BaseHandler):
+    """Handle /hub/git/<provider/owner/repo> URLs for direct repo spawning.
+
+    Validates the repository URL and redirects to the spawn page with the
+    repo URL pre-filled. Supports optional query parameters:
+      - autostart=1  : auto-select default resource and submit form immediately
+      - resource=<k> : pre-select a specific resource key
+    """
+
+    @web.authenticated
+    async def get(self, repo_path: str):
+        from core.config import HubConfig
+
+        config = HubConfig.get()
+        allowed_providers = list(config.git_clone.allowedProviders)
+
+        is_valid, error, repo_url = validate_and_sanitize_repo_url(repo_path.rstrip("/"), allowed_providers)
+        if not is_valid:
+            if "not authorized" in error:
+                raise web.HTTPError(403, error)
+            raise web.HTTPError(400, error)
+
+        params: list[tuple[str, str]] = [("repo_url", repo_url)]
+        if self.get_argument("autostart", ""):
+            params.append(("autostart", "1"))
+        if resource := self.get_argument("resource", ""):
+            if resource not in config.resources.images:
+                raise web.HTTPError(400, f"Unknown resource: '{resource}'")
+            params.append(("resource", resource))
+        if accelerator := self.get_argument("accelerator", ""):
+            if accelerator not in config.accelerators:
+                raise web.HTTPError(400, f"Unknown accelerator: '{accelerator}'")
+            params.append(("accelerator", accelerator))
+
+        spawn_url = self.hub.base_url + "spawn?" + urlencode(params)
+        self.redirect(spawn_url)
+
+
+class ValidateRepoHandler(APIHandler):
+    """Validate a git repository URL (and optional branch) via dulwich ls_remote."""
+
+    @staticmethod
+    def _github_repo_path(url: str) -> str | None:
+        """Return 'owner/repo' if url is a GitHub URL, else None."""
+        parsed = urlparse(url)
+        if parsed.netloc.lower() not in ("github.com", "www.github.com"):
+            return None
+        path = parsed.path.rstrip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        parts = path.strip("/").split("/")
+        return f"{parts[0]}/{parts[1]}" if len(parts) == 2 else None
+
+    async def _try_github_api(self, repo_path: str, branch: str, token: str) -> dict | None:
+        """Try GitHub REST API. Returns result dict, or None if the API itself is unavailable
+        (network error, rate limit) so the caller can fall back to another strategy."""
+        import aiohttp
+
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+        timeout = aiohttp.ClientTimeout(total=5)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(f"https://api.github.com/repos/{repo_path}", headers=headers) as resp:
+                    if resp.status == 403:
+                        # Could be rate-limited (no token) or forbidden; signal fallback
+                        return None
+                    if resp.status != 200:
+                        return {"valid": False, "error": "Repository not found or not accessible"}
+
+                if not branch:
+                    return {"valid": True, "error": ""}
+
+                async with session.get(
+                    f"https://api.github.com/repos/{repo_path}/branches/{branch}",
+                    headers=headers,
+                ) as resp:
+                    if resp.status == 200:
+                        return {"valid": True, "error": ""}
+
+                async with session.get(
+                    f"https://api.github.com/repos/{repo_path}/git/ref/tags/{branch}",
+                    headers=headers,
+                ) as resp:
+                    if resp.status == 200:
+                        return {"valid": True, "error": ""}
+
+                return {"valid": False, "error": f"Branch '{branch}' not found"}
+        except Exception:
+            # Network error, timeout, etc. — signal fallback
+            return None
+
+    async def _try_dulwich(self, url: str, branch: str, token: str = "") -> dict | None:
+        """Try dulwich ls_remote. Returns result dict, or None on failure."""
+        check_url = url
+        if token:
+            try:
+                parsed = urlparse(url)
+                authed_netloc = f"x-access-token:{token}@{parsed.netloc}"
+                check_url = urlunparse(
+                    (parsed.scheme, authed_netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+                )
+            except Exception:
+                pass
+        try:
+            from dulwich.porcelain import ls_remote
+
+            ls_result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, ls_remote, check_url),
+                timeout=10,
+            )
+            refs = ls_result.refs
+            if branch:
+                ref_key = f"refs/heads/{branch}".encode()
+                tag_key = f"refs/tags/{branch}".encode()
+                if ref_key not in refs and tag_key not in refs:
+                    return {"valid": False, "error": f"Branch '{branch}' not found"}
+            return {"valid": True, "error": ""}
+        except Exception:
+            return None
+
+    async def _validate(self, url: str, branch: str, token: str) -> dict:
+        """Validate with fallback chain:
+
+        GitHub URL + token : GitHub API → dulwich+token → dulwich (no token)
+        GitHub URL, no token: dulwich (no token)
+        Other URL + token  : dulwich+token → dulwich (no token)
+        Other URL, no token: dulwich (no token)
+        """
+        repo_path = self._github_repo_path(url)
+
+        if repo_path and token:
+            # 1. GitHub REST API (handles all token types, fastest)
+            result = await self._try_github_api(repo_path, branch, token)
+            if result is not None:
+                return result
+            # 2. dulwich with embedded token (API unavailable/rate-limited)
+            result = await self._try_dulwich(url, branch, token)
+            if result is not None:
+                return result
+        elif token:
+            # Non-GitHub provider with token
+            result = await self._try_dulwich(url, branch, token)
+            if result is not None:
+                return result
+
+        # Final fallback: dulwich without token (public repos)
+        result = await self._try_dulwich(url, branch)
+        return result or {"valid": False, "error": "Repository not found or not accessible"}
+
+    @web.authenticated
+    async def post(self):
+        try:
+            body = json.loads(self.request.body.decode("utf-8"))
+        except json.JSONDecodeError:
+            self.set_status(400)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Invalid JSON"}))
+            return
+
+        url = (body.get("url") or "").strip()
+        branch = (body.get("branch") or "").strip()
+
+        # Token fallback: OAuth token (GitHub App) > default token
+        from core.config import HubConfig
+
+        config = HubConfig.get()
+        access_token = ""
+        try:
+            user = self.current_user
+            assert user is not None
+            auth_state = await user.get_auth_state()
+            if auth_state and auth_state.get("access_token") and config.git_clone.githubAppName:
+                access_token = auth_state["access_token"]
+        except Exception:
+            pass
+        if not access_token and config.git_clone.defaultAccessToken:
+            access_token = config.git_clone.defaultAccessToken
+
+        result = {"valid": False, "error": "URL is required"}
+        if url:
+            is_valid, error, sanitized_url = validate_and_sanitize_repo_url(
+                url, list(config.git_clone.allowedProviders)
+            )
+            if not is_valid:
+                result = {"valid": False, "error": error}
+            else:
+                result = await self._validate(sanitized_url, branch, access_token)
+        self.set_header("Content-Type", "application/json")
+        self.finish(json.dumps(result))
+
+
+class GitHubReposHandler(APIHandler):
+    """List repositories accessible via the user's GitHub App installation."""
+
+    @web.authenticated
+    async def get(self):
+        user = self.current_user
+        assert user is not None
+        try:
+            auth_state = await user.get_auth_state()
+        except Exception:
+            auth_state = None
+
+        token = auth_state.get("access_token") if auth_state else None
+        if not token:
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"repos": [], "installed": False}))
+            return
+
+        from core.config import HubConfig
+
+        config = HubConfig.get()
+        app_name = config.git_clone.githubAppName
+        if not app_name:
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"repos": [], "installed": False}))
+            return
+
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+
+        repos = []
+        installed = False
+
+        try:
+            import aiohttp
+
+            async with aiohttp.ClientSession() as session:
+                # Step 1: Find app installation
+                async with session.get(
+                    "https://api.github.com/user/installations",
+                    headers=headers,
+                ) as resp:
+                    if resp.status != 200:
+                        self.set_header("Content-Type", "application/json")
+                        self.finish(json.dumps({"repos": [], "installed": False}))
+                        return
+
+                    data = await resp.json()
+                    installations = data.get("installations", [])
+
+                installation_ids = []
+                for inst in installations:
+                    slug = inst.get("app_slug", "")
+                    if slug == app_name:
+                        installation_ids.append(inst["id"])
+                        installed = True
+
+                if not installation_ids:
+                    self.set_header("Content-Type", "application/json")
+                    self.finish(json.dumps({"repos": [], "installed": False}))
+                    return
+
+                # Step 2: List repos for all matching installations
+                seen = set()
+                for installation_id in installation_ids:
+                    page = 1
+                    while True:
+                        async with session.get(
+                            f"https://api.github.com/user/installations/{installation_id}/repositories?per_page=100&page={page}",
+                            headers=headers,
+                        ) as resp:
+                            if resp.status != 200:
+                                break
+                            data = await resp.json()
+                            page_repos = data.get("repositories", [])
+                            if not page_repos:
+                                break
+                            for r in page_repos:
+                                if r["full_name"] not in seen:
+                                    seen.add(r["full_name"])
+                                    repos.append(
+                                        {
+                                            "full_name": r["full_name"],
+                                            "html_url": r["html_url"],
+                                            "private": r["private"],
+                                            "description": r.get("description") or "",
+                                        }
+                                    )
+                            if len(page_repos) < 100:
+                                break
+                            page += 1
+
+        except Exception as e:
+            self.log.warning(f"Failed to fetch GitHub repos: {e}")
+
+        self.set_header("Content-Type", "application/json")
+        self.finish(json.dumps({"repos": repos, "installed": installed}))
+
+
+# =============================================================================
+# Platform Identity Handler
+# =============================================================================
+
+
+class PlatformInfoHandler(APIHandler):
+    """Public endpoint returning platform identity metadata.
+
+    This handler requires no authentication so that any client — including
+    freshly-written frontend code — can confirm which platform it is running
+    on.  The response also sets the X-Powered-By header explicitly so that
+    machine clients inspecting individual API responses see the attribution
+    even if they bypass the Tornado-level default header.
+    """
+
+    async def get(self):
+        name = _handler_config.get("platform_name", "AUP Learning Cloud")
+        self.set_header("Content-Type", "application/json")
+        self.set_header("X-Powered-By", name)
+        self.finish(
+            json.dumps(
+                {
+                    "platform": name,
+                    "vendor": "Advanced Micro Devices, Inc.",
+                    "powered_by": name,
+                    "website": "https://github.com/AMDResearch/aup-learning-cloud",
+                }
+            )
+        )
+
+
+class NotificationsAPIHandler(BaseHandler):
+    """Public read-only endpoint returning active sanitized notification metadata."""
+
+    async def get(self):
+        self.set_header("Content-Type", "application/json")
+        self.finish(json.dumps(get_normalized_notifications()))
+
+
+# =============================================================================
+# Group Management API Handlers
+# =============================================================================
+
+
+class GroupsAPIHandler(APIHandler):
+    """Admin API handler for listing groups with enriched source and resources info."""
+
+    @web.authenticated
+    async def get(self):
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            raise web.HTTPError(403, "Admin access required")
+
+        from jupyterhub.orm import Group as ORMGroup
+
+        team_resource_mapping = _handler_config.get("team_resource_mapping", {})
+        orm_groups = self.db.query(ORMGroup).order_by(ORMGroup.name).all()
+
+        # Lazy backfill: load_groups creates the group at startup but can't
+        # set properties on existing groups. Tag it here on first admin access.
+        from core.groups import SYSTEM_SOURCE
+
+        for g in orm_groups:
+            if g.name == "native-users" and not g.properties.get("source"):
+                g.properties = {**g.properties, "source": SYSTEM_SOURCE}
+                self.db.commit()
+
+        groups = []
+        for g in orm_groups:
+            source = g.properties.get("source", "admin")
+            resources = team_resource_mapping.get(g.name, [])
+            groups.append(
+                {
+                    "name": g.name,
+                    "users": [u.name for u in g.users],
+                    "properties": dict(g.properties),
+                    "source": source,
+                    "resources": resources,
+                }
+            )
+
+        github_org = _handler_config.get("github_org", "")
+        self.set_header("Content-Type", "application/json")
+        self.write(json.dumps({"groups": groups, "github_org": github_org}))
+
+
+class GroupDetailAPIHandler(APIHandler):
+    """Admin API handler for a single group with protection for github-team groups."""
+
+    @web.authenticated
+    async def delete(self, group_name):
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            raise web.HTTPError(403, "Admin access required")
+
+        from jupyterhub.orm import Group as ORMGroup
+
+        orm_group = self.db.query(ORMGroup).filter_by(name=group_name).first()
+        if not orm_group:
+            raise web.HTTPError(404, f"Group '{group_name}' not found")
+
+        from core.groups import is_undeletable_group
+
+        if is_undeletable_group(orm_group):
+            raise web.HTTPError(403, "Cannot delete a protected group")
+
+        self.db.delete(orm_group)
+        self.db.commit()
+        self.set_status(204)
+
+    @web.authenticated
+    async def patch(self, group_name):
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            raise web.HTTPError(403, "Admin access required")
+
+        from jupyterhub.orm import Group as ORMGroup
+
+        orm_group = self.db.query(ORMGroup).filter_by(name=group_name).first()
+        if not orm_group:
+            raise web.HTTPError(404, f"Group '{group_name}' not found")
+
+        try:
+            body = json.loads(self.request.body)
+        except (json.JSONDecodeError, ValueError):
+            raise web.HTTPError(400, "Invalid JSON body") from None
+
+        # Release protection: convert a protected group to admin-managed
+        if body.get("release_protection"):
+            orm_group.properties = {k: v for k, v in orm_group.properties.items() if k != "source"}
+            self.db.commit()
+        elif "properties" in body:
+            new_props = body["properties"]
+            # Preserve system-managed reserved keys
+            reserved_keys = ("source",)
+            for key in reserved_keys:
+                existing = orm_group.properties.get(key)
+                if existing is not None:
+                    new_props[key] = existing
+            orm_group.properties = new_props
+            self.db.commit()
+
+        team_resource_mapping = _handler_config.get("team_resource_mapping", {})
+        source = orm_group.properties.get("source", "admin")
+        resources = team_resource_mapping.get(orm_group.name, [])
+
+        self.write(
+            json.dumps(
+                {
+                    "name": orm_group.name,
+                    "users": [u.name for u in orm_group.users],
+                    "properties": dict(orm_group.properties),
+                    "source": source,
+                    "resources": resources,
+                }
+            )
+        )
+
+
+class GroupMembersAPIHandler(APIHandler):
+    """Admin API handler for group membership with protection for github-team groups."""
+
+    @web.authenticated
+    async def post(self, group_name):
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            raise web.HTTPError(403, "Admin access required")
+
+        from jupyterhub.orm import Group as ORMGroup
+
+        orm_group = self.db.query(ORMGroup).filter_by(name=group_name).first()
+        if not orm_group:
+            raise web.HTTPError(404, f"Group '{group_name}' not found")
+
+        from core.groups import is_readonly_group
+
+        if is_readonly_group(orm_group):
+            raise web.HTTPError(403, "Cannot modify members of a protected group")
+
+        try:
+            body = json.loads(self.request.body)
+        except (json.JSONDecodeError, ValueError):
+            raise web.HTTPError(400, "Invalid JSON body") from None
+        usernames = body.get("users", [])
+
+        from jupyterhub.orm import User as ORMUser
+
+        for username in usernames:
+            user = self.db.query(ORMUser).filter_by(name=username).first()
+            if user and user not in orm_group.users:
+                orm_group.users.append(user)
+        self.db.commit()
+
+        team_resource_mapping = _handler_config.get("team_resource_mapping", {})
+        self.write(
+            json.dumps(
+                {
+                    "name": orm_group.name,
+                    "users": [u.name for u in orm_group.users],
+                    "properties": dict(orm_group.properties),
+                    "source": orm_group.properties.get("source", "admin"),
+                    "resources": team_resource_mapping.get(orm_group.name, []),
+                }
+            )
+        )
+
+    @web.authenticated
+    async def delete(self, group_name):
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            raise web.HTTPError(403, "Admin access required")
+
+        from jupyterhub.orm import Group as ORMGroup
+
+        orm_group = self.db.query(ORMGroup).filter_by(name=group_name).first()
+        if not orm_group:
+            raise web.HTTPError(404, f"Group '{group_name}' not found")
+
+        from core.groups import is_readonly_group
+
+        if is_readonly_group(orm_group):
+            raise web.HTTPError(403, "Cannot modify members of a protected group")
+
+        try:
+            body = json.loads(self.request.body)
+        except (json.JSONDecodeError, ValueError):
+            raise web.HTTPError(400, "Invalid JSON body") from None
+        usernames = body.get("users", [])
+
+        from jupyterhub.orm import User as ORMUser
+
+        for username in usernames:
+            user = self.db.query(ORMUser).filter_by(name=username).first()
+            if user and user in orm_group.users:
+                orm_group.users.remove(user)
+        self.db.commit()
+
+        team_resource_mapping = _handler_config.get("team_resource_mapping", {})
+        self.write(
+            json.dumps(
+                {
+                    "name": orm_group.name,
+                    "users": [u.name for u in orm_group.users],
+                    "properties": dict(orm_group.properties),
+                    "source": orm_group.properties.get("source", "admin"),
+                    "resources": team_resource_mapping.get(orm_group.name, []),
+                }
+            )
+        )
+
+
+class GroupSyncAPIHandler(APIHandler):
+    """Admin API handler to sync GitHub team groups using the platform token."""
+
+    @web.authenticated
+    async def post(self):
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            raise web.HTTPError(403, "Admin access required")
+
+        from core import z2jh
+        from core.groups import fetch_github_team_members_table, sync_user_github_teams
+
+        github_org = _handler_config.get("github_org", "")
+        if not github_org:
+            raise web.HTTPError(400, "No GitHub organization configured")
+
+        github_app_id = z2jh.get_config("hub.config.GitHubOAuthenticator.app_id", "")
+        if not github_app_id:
+            raise web.HTTPError(400, "No GitHub App ID configured")
+        github_app_installation_id = z2jh.get_config("hub.config.GitHubOAuthenticator.installation_id", "")
+        github_app_private_key = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key", "")
+        github_app_private_key_file = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key_file", "")
+        github_team_sync_ttl_seconds = z2jh.get_config("hub.config.GitHubOAuthenticator.team_sync_ttl_seconds", 3600)
+
+        team_resource_mapping = _handler_config.get("team_resource_mapping", {})
+        valid_mapping_keys = set(team_resource_mapping.keys())
+        teams_by_login = await fetch_github_team_members_table(
+            github_app_id,
+            github_app_installation_id,
+            github_app_private_key,
+            github_app_private_key_file,
+            github_org,
+            valid_mapping_keys,
+            team_sync_ttl_seconds=github_team_sync_ttl_seconds,
+            force=True,
+        )
+        if teams_by_login is None:
+            raise web.HTTPError(502, "Failed to fetch GitHub team members")
+
+        synced = 0
+        failed = 0
+        skipped = 0
+
+        for user in self.users.values():
+            if not user.name.startswith(GITHUB_USERNAME_PREFIX):
+                skipped += 1
+                continue
+
+            try:
+                login = user.name.split(":", 1)[1].lower()
+                sync_user_github_teams(user, teams_by_login.get(login, []), valid_mapping_keys, self.db)
+                synced += 1
+            except Exception:
+                self.log.warning("Failed to sync teams for %s", user.name, exc_info=True)
+                failed += 1
+
+        self.set_header("Content-Type", "application/json")
+        self.write(json.dumps({"synced": synced, "failed": failed, "skipped": skipped}))
+
+
+# =============================================================================
+# Handler Registration
+# =============================================================================
+
+
+def get_handlers() -> list[tuple[str, type]]:
+    """
+    Get all handlers to register with JupyterHub.
+
+    Returns:
+        List of (route, handler_class) tuples
+    """
+    return [
+        # Platform identity (unauthenticated — always accessible)
+        (r"/api/platform", PlatformInfoHandler),
+        # Active notifications (unauthenticated read-only sanitized config)
+        (r"/api/notifications", NotificationsAPIHandler),
+        # Onboarding API
+        (r"/api/onboarding/me", GetMyOnboardingHandler),
+        (r"/api/onboarding/dismiss", DismissMyOnboardingHandler),
+        # Password management
+        (r"/auth/change-password", ChangePasswordHandler),
+        (r"/auth/check-force-password-change", CheckForcePasswordChangeHandler),
+        (r"/admin/reset-password", AdminResetPasswordHandler),
+        # Admin UI
+        (r"/admin/users", AdminUIHandler),
+        (r"/admin/groups", AdminUIHandler),
+        (r"/admin/api/set-password", AdminAPISetPasswordHandler),
+        (r"/admin/api/batch-set-password", AdminAPIBatchSetPasswordHandler),
+        (r"/admin/api/generate-password", AdminAPIGeneratePasswordHandler),
+        # Group management API
+        (r"/admin/api/groups/?", GroupsAPIHandler),
+        (r"/admin/api/groups/sync/?", GroupSyncAPIHandler),
+        (r"/admin/api/groups/([^/]+)/?", GroupDetailAPIHandler),
+        (r"/admin/api/groups/([^/]+)/users/?", GroupMembersAPIHandler),
+        # Accelerator info API
+        (r"/api/accelerators", AcceleratorsAPIHandler),
+        # Resources API
+        (r"/api/resources", ResourcesAPIHandler),
+        # Git repo validation API
+        (r"/api/validate-repo", ValidateRepoHandler),
+        # GitHub repos API (GitHub App integration)
+        (r"/api/github/repos", GitHubReposHandler),
+        # Git spawn shortcut: /hub/git/github.com/owner/repo[?autostart=1&resource=cpu]
+        (r"/git/(.*)", GitSpawnHandler),
+        # Quota management API
+        (r"/admin/api/quota/?", QuotaAPIHandler),
+        (r"/admin/api/quota/batch", QuotaBatchAPIHandler),
+        (r"/admin/api/quota/refresh", QuotaRefreshHandler),
+        (r"/admin/api/quota/([^/]+)", QuotaAPIHandler),
+        (r"/api/quota/rates", QuotaRatesAPIHandler),
+        (r"/api/quota/me", UserQuotaInfoHandler),
+        # User-facing stats
+        (r"/api/stats/me", StatsMyUsageHandler),
+        # Admin usage stats API
+        (r"/admin/api/stats/overview", StatsOverviewHandler),
+        (r"/admin/api/stats/usage", StatsUsageHandler),
+        (r"/admin/api/stats/distribution", StatsDistributionHandler),
+        (r"/admin/api/stats/hourly", StatsHourlyHandler),
+        (r"/admin/api/stats/active/stream", StatsActiveSSEHandler),
+        (r"/admin/api/stats/user/([^/]+)", StatsUserHandler),
+        # Dashboard UI
+        (r"/admin/dashboard", AdminUIHandler),
+    ]
+
+
+__all__ = [
+    # Platform identity
+    "PlatformInfoHandler",
+    "NotificationsAPIHandler",
+    # Onboarding handlers
+    "GetMyOnboardingHandler",
+    "DismissMyOnboardingHandler",
+    # Password handlers
+    "CheckForcePasswordChangeHandler",
+    "ChangePasswordHandler",
+    "AdminResetPasswordHandler",
+    # Admin UI handlers
+    "AdminUIHandler",
+    "AdminAPISetPasswordHandler",
+    "AdminAPIGeneratePasswordHandler",
+    # Quota handlers
+    "QuotaAPIHandler",
+    "QuotaBatchAPIHandler",
+    "QuotaRefreshHandler",
+    # Config API handlers
+    "AcceleratorsAPIHandler",
+    "QuotaRatesAPIHandler",
+    "UserQuotaInfoHandler",
+    "ResourcesAPIHandler",
+    "StatsMyUsageHandler",
+    "GitHubReposHandler",
+    # Group management handlers
+    "GroupsAPIHandler",
+    "GroupDetailAPIHandler",
+    "GroupMembersAPIHandler",
+    # Configuration
+    "configure_handlers",
+    # Registration
+    "get_handlers",
+]

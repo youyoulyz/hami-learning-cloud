@@ -1,0 +1,61 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+---
+- name: Undo cluster setup
+  hosts: k3s_cluster
+  become: true
+  tasks:
+    - name: Run K3s Uninstall script [server]
+      when: "'server' in group_names"
+      ansible.builtin.command:
+        cmd: k3s-uninstall.sh
+        removes: /var/lib/rancher/k3s/*
+    - name: Run K3s Uninstall script [agent]
+      when: "'agent' in group_names"
+      ansible.builtin.command:
+        cmd: k3s-agent-uninstall.sh
+        removes: /var/lib/rancher/k3s/*
+    - name: Remove user kubeconfig
+      ansible.builtin.file:
+        path: ~{{ ansible_user }}/.kube/config
+        state: absent
+    - name: Remove k3s install script
+      ansible.builtin.file:
+        path: /usr/local/bin/k3s-install.sh
+        state: absent
+    - name: Remove contents of K3s server location
+      when: k3s_server_location is defined
+      ansible.builtin.shell:
+        cmd: "rm -rf {{ k3s_server_location }}/*"
+        removes: "{{ k3s_server_location }}/*"
+    - name: Remove K3s config
+      when: server_config_yaml is defined
+      ansible.builtin.file:
+        path: /etc/rancher/k3s/config.yaml
+        state: absent
+
+- name: Undo user setup
+  hosts: server
+  tasks:
+    - name: Remove K3s commands from ~/.bashrc
+      ansible.builtin.lineinfile:
+        path: "~{{ ansible_user }}/.bashrc"
+        search_string: "Added by k3s-ansible"
+        state: absent

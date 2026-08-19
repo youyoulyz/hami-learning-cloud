@@ -1,0 +1,24 @@
+{
+  "recommendations": [
+    // Python
+    "charliermarsh.ruff",
+    "ms-python.python",
+
+    // JavaScript/TypeScript/Vue
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "vue.volar",
+
+    // YAML
+    "redhat.vscode-yaml",
+
+    // Shell
+    "timonwong.shellcheck",
+
+    // EditorConfig
+    "editorconfig.editorconfig",
+
+    // Git
+    "eamodio.gitlens"
+  ]
+}

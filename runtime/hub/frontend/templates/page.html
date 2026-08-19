@@ -1,0 +1,597 @@
+<!-- Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ Portions of this file consist of AI-generated content. -->
+<!--
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+
+
+
+{% macro modal(title, btn_label=None, btn_class="btn-dark") %}
+  {% set key = title.replace(' ', '-').lower() %}
+  {% set btn_label = btn_label or title %}
+  <div class="modal fade"
+       id="{{ key }}-dialog"
+       tabindex="-1"
+       role="dialog"
+       aria-labelledby="{{ key }}-label"
+       aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title" id="{{ key }}-label">{{ title }}</h2>
+          <button type="button"
+                  class="btn-close"
+                  data-bs-dismiss="modal"
+                  aria-label="Close"></button>
+        </div>
+        <div class="modal-body">{{ caller() }}</div>
+        <div class="modal-footer">
+          <button type="button"
+                  class="btn {{ btn_class }}"
+                  data-bs-dismiss="modal"
+                  data-dismiss="modal">{{ btn_label }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endmacro %}
+<!DOCTYPE HTML>
+<html lang="en">
+  <head>
+    <!-- <meta name="color-scheme" content="light"> -->
+    <meta charset="utf-8">
+    <title>
+      {%- block title -%}
+         {{ platform_name or 'AUP Learning Cloud' }}
+      {%- endblock title -%}
+    </title>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {% block stylesheet %}
+      <link rel="stylesheet"
+            href="{{ static_url('css/style.min.css') }}"
+            type="text/css" />
+      <style>
+        /* AMD logo color: black in light mode, white in dark mode */
+        #amd-logo svg {
+          color: #000000;
+        }
+        [data-bs-theme="dark"] #amd-logo svg {
+          color: #ffffff;
+        }
+        /* Sticky footer: short pages → footer pinned to viewport bottom;
+           tall pages → footer flows naturally at end of content. */
+        html, body {
+          min-height: 100vh;
+        }
+        body {
+          display: flex;
+          flex-direction: column;
+        }
+        #auplc-powered-by-footer {
+          margin-top: auto;
+          text-align: center;
+          padding: 6px 0;
+          font-size: 0.72rem;
+          opacity: 0.55;
+          border-top: 1px solid rgba(128, 128, 128, 0.15);
+        }
+        #notification-banner-mount {
+          width: 100%;
+          margin: 0 0 1rem;
+        }
+        #notification-banner-mount:empty {
+          display: none;
+          margin: 0;
+        }
+        .notification-banner {
+          --notification-rule: var(--bs-border-color-translucent);
+          --notification-accent: var(--bs-warning-text-emphasis, var(--bs-body-color));
+          border-top: 1px solid var(--notification-rule);
+          border-bottom: 1px solid var(--notification-rule);
+          background: transparent;
+          color: var(--notification-accent);
+          padding: 0.45rem var(--bs-gutter-x, 0.75rem);
+        }
+        .notification-banner[data-severity="info"] {
+          --notification-rule: var(--bs-info-border-subtle, var(--bs-border-color-translucent));
+          --notification-accent: var(--bs-info-text-emphasis, var(--bs-body-color));
+        }
+        .notification-banner[data-severity="success"] {
+          --notification-rule: var(--bs-success-border-subtle, var(--bs-border-color-translucent));
+          --notification-accent: var(--bs-success-text-emphasis, var(--bs-body-color));
+        }
+        .notification-banner[data-severity="warning"] {
+          --notification-rule: var(--bs-warning-border-subtle, var(--bs-border-color-translucent));
+          --notification-accent: var(--bs-warning-text-emphasis, var(--bs-body-color));
+        }
+        .notification-banner[data-severity="danger"] {
+          --notification-rule: var(--bs-danger-border-subtle, var(--bs-border-color-translucent));
+          --notification-accent: var(--bs-danger-text-emphasis, var(--bs-body-color));
+        }
+        .notification-banner-summary {
+          display: flex;
+          align-items: center;
+          gap: 0.65rem;
+          min-width: 0;
+        }
+        .notification-banner-severity {
+          flex: 0 0 auto;
+          padding: 0;
+          font-size: 0.68rem;
+          font-weight: 700;
+          line-height: 1.2;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+        .notification-banner-preview {
+          flex: 1 1 auto;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 0.9rem;
+          font-weight: 600;
+        }
+        .notification-banner-toggle {
+          flex: 0 0 auto;
+        }
+        .notification-banner-body {
+          display: none;
+          margin-top: 0.45rem;
+          padding-top: 0.45rem;
+          border-top: 1px solid var(--notification-rule);
+        }
+        .notification-banner.is-expanded .notification-banner-body {
+          display: block;
+        }
+        .notification-banner-title,
+        .notification-banner-message {
+          font-size: 0.9rem;
+        }
+        .notification-banner-title :last-child,
+        .notification-banner-message :last-child {
+          margin-bottom: 0;
+        }
+        .notification-banner-title {
+          margin-bottom: 0.35rem;
+          font-weight: 700;
+        }
+        .notification-banner-link {
+          display: inline-flex;
+          align-items: center;
+          margin-top: 0.55rem;
+          font-weight: 700;
+        }
+        @media (max-width: 575.98px) {
+          .notification-banner {
+            padding: 0.45rem var(--bs-gutter-x, 0.75rem);
+          }
+          .notification-banner-summary {
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+          }
+          .notification-banner-preview {
+            flex-basis: calc(100% - 4.5rem);
+            white-space: normal;
+          }
+          .notification-banner-toggle {
+            margin-left: auto;
+          }
+        }
+      </style>
+    {% endblock stylesheet %}
+    {% block favicon %}
+      <link rel="icon" href="{{ static_url('favicon.ico') }}" type="image/x-icon">
+    {% endblock favicon %}
+    {% block scripts %}
+      <script src="{{static_url("components/bootstrap/dist/js/bootstrap.bundle.min.js") }}"
+              type="text/javascript"
+              charset="utf-8"></script>
+      <script src="{{static_url("components/requirejs/require.js") }}"
+              type="text/javascript"
+              charset="utf-8"></script>
+      <script src="{{static_url("components/jquery/dist/jquery.min.js") }}"
+              type="text/javascript"
+              charset="utf-8"></script>
+      <script src="{{static_url("js/darkmode.js") }}"
+              type="text/javascript"
+              charset="utf-8"></script>
+      <script type="text/javascript">
+        // Keep auplc-theme (React apps) and jupyterhub-bs-theme (darkmode.js)
+        // in sync by observing data-bs-theme attribute changes on <html>.
+        (function() {
+          var obs = new MutationObserver(function(mutations) {
+            mutations.forEach(function(m) {
+              if (m.attributeName === 'data-bs-theme') {
+                var t = document.documentElement.getAttribute('data-bs-theme');
+                if (t) {
+                  localStorage.setItem('auplc-theme', t);
+                  localStorage.setItem('jupyterhub-bs-theme', t);
+                }
+              }
+            });
+          });
+          obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme'] });
+        })();
+      </script>
+    {% endblock scripts %}
+    {# djlint js formatting doesn't handle template blocks in js #}
+    {# djlint: off #}
+    {% block require_config %}
+    <script type="text/javascript">
+      require.config({
+        {% if version_hash %}
+        urlArgs: "v={{version_hash}}",
+        {% endif %}
+        baseUrl: '{{static_url("js", include_version=False)}}',
+        paths: {
+          components: '../components',
+          jquery: '../components/jquery/dist/jquery.min',
+          moment: "../components/moment/moment",
+        },
+      });
+
+      window.jhdata = {
+        base_url: "{{base_url}}",
+        prefix: "{{prefix}}",
+        {% if user %}
+        {#- Autoescaping in templates is turned on in JupyterHub, #}
+        {#-  need `| safe` to prevent escaping #}
+        {#- `https://github.com/pallets/markupsafe/blob/2.1.4/src/markupsafe/_native.py#L6` #}
+        user: "{{ user.json_escaped_name | safe }}",
+        {% endif %}
+        {% if admin_access %}
+        admin_access: true,
+        {% else %}
+        admin_access: false,
+        {% endif %}
+        {% if not no_spawner_check and user and user.spawner.options_form %}
+        options_form: true,
+        {% else %}
+        options_form: false,
+        {% endif %}
+        xsrf_token: "{{ xsrf_token }}",
+      };
+
+</script>
+    {% endblock require_config %}
+    {# djlint: on #}
+    {% block meta %}
+      <meta name="description" content="{{ platform_name or 'AUP Learning Cloud' }} - AMD AI Learning Platform">
+      <meta name="keywords" content="AMD, AI, Learning, Jupyter, Notebook">
+      <meta name="generator" content="{{ powered_by or platform_name or 'AUP Learning Cloud' }}">
+    {% endblock meta %}
+  </head>
+  <body>
+    <noscript>
+      <div id='noscript'>
+         {{ platform_name or 'AUP Learning Cloud' }} requires JavaScript.
+        <br>
+        Please enable it to proceed.
+      </div>
+    </noscript>
+    {% block nav_bar %}
+      <nav class="navbar navbar-expand-sm bg-body-tertiary mb-4">
+        <div class="container-fluid">
+           {% block logo %}
+              <span id="amd-logo" class="navbar-brand">
+               <a href="{{ logo_url or base_url }}">
+                 <svg style="width: 120px; height: auto;" id="Layer_1" data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 139.72 33.32" fill="currentColor">
+                   <title>AMD logo</title>
+                   <path d="M33,31.14H25.21l-2.37-5.72H9.92L7.76,31.14H.14L11.78,2.26h8.34Zm-16.89-22L11.83,20.39h8.89Z" transform="translate(-0.14 -0.03)" />
+                   <path d="M61.1,2.26h6.27V31.14h-7.2v-18l-7.79,9.06h-1.1L43.49,13.1v18h-7.2V2.26h6.27L51.83,13Z" transform="translate(-0.14 -0.03)" />
+                   <path d="M85.61,2.26c10.54,0,16,6.56,16,14.48,0,8.3-5.25,14.4-16.77,14.4H72.86V2.26ZM80.06,25.85h4.7c7.24,0,9.4-4.91,9.4-9.15,0-5-2.67-9.15-9.48-9.15H80.06Z" transform="translate(-0.14 -0.03)" />
+                   <polygon points="130.64 9.08 115.75 9.08 106.68 0 139.72 0 139.72 33.05 130.64 23.97 130.64 9.08" />
+                   <polygon points="115.74 23.98 115.74 10.9 106.4 20.24 106.4 33.33 119.48 33.33 128.82 23.98 115.74 23.98" />
+                 </svg>
+               </a>
+             </span>
+           {% endblock logo %}
+          {% if user %}
+            <button class="navbar-toggler"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#thenavbar"
+                    aria-controls="thenavbar"
+                    aria-expanded="false"
+                    aria-label="Toggle navigation">
+              <span class="navbar-toggler-icon"></span>
+            </button>
+          {% endif %}
+          <div class="collapse navbar-collapse" id="thenavbar">
+            <ul class="navbar-nav me-auto mb-0">
+              {% if user %}
+                {% block nav_bar_left_items %}
+                  <li class="nav-item">
+                    <a class="nav-link" href="{{ base_url }}home">Home</a>
+                  </li>
+                  
+                  {% if 'admin-ui' in parsed_scopes %}
+                    <li class="nav-item">
+                      <a class="nav-link" href="{{ base_url }}admin/users">Admin</a>
+                    </li>
+                    <li class="nav-item">
+                      <a class="nav-link" href="{{ base_url }}token">Token</a>
+                    </li>
+                  {% endif %}
+                  {% if services %}
+                    <li class="nav-item dropdown">
+                      <a href="#"
+                         class="nav-link dropdown-toggle"
+                         data-bs-toggle="dropdown"
+                         role="button"
+                         aria-expanded="false">Services</a>
+                      <ul class="dropdown-menu">
+                        {% for service in services %}
+                          {% block service scoped %}
+                            <li>
+                              <a class="dropdown-item" href="{{ service.href }}">{{ service.name }}</a>
+                            </li>
+                          {% endblock service %}
+                        {% endfor %}
+                      </ul>
+                    </li>
+                  {% endif %}
+                {% endblock nav_bar_left_items %}
+              {% endif %}
+            </ul>
+            <ul class="nav navbar-nav me-2">
+              {% block nav_bar_right_items %}
+                <li class="nav-item">
+                  {% block theme_toggle %}
+                    <button class="btn btn-sm"
+                            id="dark-theme-toggle"
+                            aria-label="Toggle dark mode"
+                            title="Toggle dark mode">
+                      <i aria-hidden="true" class="fa fa-circle-half-stroke"></i>
+                    </button>
+                  {% endblock theme_toggle %}
+                </li>
+                <li class="nav-item">
+                  {% block login_widget %}
+                    <span id="login_widget">
+                      {% if user %}
+                        <span class="me-1">{{ user.name }}</span>
+                        {% if not hide_logout %}
+                          {% if not user.name.startswith('github:') %}
+                          <a id="change-password"
+                             role="button"
+                             class="btn btn-sm btn-outline-secondary me-1"
+                             href="{{ base_url }}auth/change-password">
+                            <i aria-hidden="true" class="fa fa-key"></i> Change Password
+                          </a>
+                          {% endif %}
+                          <a id="logout"
+                             role="button"
+                             class="btn btn-sm btn-outline-secondary"
+                             href="{{ logout_url }}"> <i aria-hidden="true" class="fa fa-sign-out"></i> Logout</a>
+                        {% endif %}
+                      {% else %}
+                        <a id="login"
+                           role="button"
+                           class="btn btn-sm btn-outline-secondary"
+                           href="{{ login_url }}">Login</a>
+                      {% endif %}
+                    </span>
+                  {% endblock login_widget %}
+                </li>
+              {% endblock nav_bar_right_items %}
+            </ul>
+          </div>
+        </div>
+      </nav>
+    {% endblock nav_bar %}
+    {% block header %}
+      {% if user %}
+        <div id="notification-banner-mount" aria-live="polite"></div>
+      {% endif %}
+    {% endblock header %}
+    {% block announcement %}
+      {% if announcement %}
+        <div class="container text-center announcement alert alert-warning">{{ announcement | safe }}</div>
+      {% endif %}
+    {% endblock announcement %}
+    {% block main %}
+    {% endblock main %}
+    {% block footer %}
+    {% endblock footer %}
+    {% call modal('Error', btn_label='OK') %}
+      <div class="ajax-error alert-danger">The error</div>
+    {% endcall %}
+    {% block script %}
+    {% endblock script %}
+    <script type="text/javascript">
+      (function() {
+        if (!window.jhdata || !window.jhdata.user) {
+          return;
+        }
+
+        var mount = document.getElementById('notification-banner-mount');
+        if (!mount) {
+          return;
+        }
+
+        var severityLabels = {
+          info: 'Info',
+          success: 'Success',
+          warning: 'Warning',
+          danger: 'Urgent'
+        };
+
+        function textFromSanitizedHtml(html) {
+          var holder = document.createElement('div');
+          holder.innerHTML = html || '';
+          return (holder.textContent || '').trim();
+        }
+
+        function renderNotificationBanner(notice) {
+          var severity = severityLabels[notice.severity] ? notice.severity : 'warning';
+          var severityLabel = severityLabels[severity];
+          var summaryText = textFromSanitizedHtml(notice.titleHtml) || textFromSanitizedHtml(notice.messageHtml) || 'Notification';
+          var contentId = 'notification-banner-content';
+
+          var banner = document.createElement('section');
+          banner.className = 'notification-banner';
+          banner.dataset.severity = severity;
+          banner.setAttribute('data-testid', 'notification-banner');
+          banner.setAttribute('role', 'region');
+          banner.setAttribute('aria-label', severityLabel + ' notification');
+
+          var summary = document.createElement('div');
+          summary.className = 'notification-banner-summary';
+
+          var severityBadge = document.createElement('span');
+          severityBadge.className = 'notification-banner-severity';
+          severityBadge.textContent = severityLabel;
+
+          var preview = document.createElement('span');
+          preview.className = 'notification-banner-preview';
+          preview.textContent = summaryText;
+
+          var toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.className = 'btn btn-sm btn-outline-secondary notification-banner-toggle';
+          toggle.setAttribute('data-testid', 'notification-banner-toggle');
+          toggle.setAttribute('aria-controls', contentId);
+          toggle.setAttribute('aria-expanded', 'false');
+          toggle.textContent = 'Details';
+
+          summary.appendChild(severityBadge);
+          summary.appendChild(preview);
+          summary.appendChild(toggle);
+
+          var body = document.createElement('div');
+          body.className = 'notification-banner-body';
+          body.id = contentId;
+          body.hidden = true;
+
+          if (notice.titleHtml) {
+            var title = document.createElement('div');
+            title.className = 'notification-banner-title';
+            title.innerHTML = notice.titleHtml;
+            body.appendChild(title);
+          }
+
+          if (notice.messageHtml) {
+            var message = document.createElement('div');
+            message.className = 'notification-banner-message';
+            message.innerHTML = notice.messageHtml;
+            body.appendChild(message);
+          }
+
+          if (notice.link && notice.link.url && notice.link.label) {
+            var link = document.createElement('a');
+            link.className = 'notification-banner-link';
+            link.href = notice.link.url;
+            link.textContent = notice.link.label;
+            link.rel = notice.link.rel || 'noopener noreferrer';
+            body.appendChild(link);
+          }
+
+          toggle.addEventListener('click', function() {
+            var expanded = toggle.getAttribute('aria-expanded') === 'true';
+            toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+            toggle.textContent = expanded ? 'Details' : 'Hide';
+            body.hidden = expanded;
+            banner.classList.toggle('is-expanded', !expanded);
+          });
+
+          banner.appendChild(summary);
+          banner.appendChild(body);
+          mount.replaceChildren(banner);
+        }
+
+        fetch('{{ base_url }}api/notifications', {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: {
+            'Accept': 'application/json'
+          }
+        })
+        .then(function(response) {
+          if (!response.ok) {
+            throw new Error('Failed to load notifications');
+          }
+          return response.json();
+        })
+        .then(function(data) {
+          if (data && data.topbar) {
+            renderNotificationBanner(data.topbar);
+          }
+        })
+        .catch(function(error) {
+          console.warn('Notification banner load error:', error);
+        });
+      })();
+    </script>
+    {% if user and not user.name.startswith('github:') and not hide_logout %}
+    <script type="text/javascript">
+      // Check if user needs to change password (only for native users)
+      (function() {
+        // Skip if already on change-password page
+        if (window.location.pathname.includes('/auth/change-password')) {
+          return;
+        }
+
+        fetch('{{ base_url }}auth/check-force-password-change', {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: {
+            'Accept': 'application/json'
+          }
+        })
+        .then(function(response) {
+          if (response.ok) {
+            return response.json();
+          }
+          throw new Error('Failed to check password status');
+        })
+        .then(function(data) {
+          if (data.needs_password_change) {
+            window.location.href = '{{ base_url }}auth/change-password?forced=1';
+          }
+        })
+        .catch(function(error) {
+          console.log('Password check error:', error);
+        });
+      })();
+    </script>
+    {% endif %}
+    {# =====================================================================
+         Permanent platform attribution footer.
+         Placed outside all {% block %} sections so that template inheritance
+         and partial rewrites cannot accidentally remove it.  The powered_by
+         variable is injected by jupyterhub_config.py via template_vars;
+         the hardcoded fallback guarantees display even if the context var is
+         missing.
+    ====================================================================== #}
+    <footer id="auplc-powered-by-footer">
+      &copy; 2025&ndash;2026 Advanced Micro Devices, Inc. All rights reserved.
+      &nbsp;&middot;&nbsp;
+      Powered by <a href="https://github.com/AMDResearch/aup-learning-cloud"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style="font-weight:600;text-decoration:none;">
+        {{ powered_by or platform_name or 'AUP Learning Cloud' }}
+      </a>
+    </footer>
+  </body>
+</html>

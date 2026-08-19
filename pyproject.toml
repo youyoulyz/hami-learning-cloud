@@ -1,0 +1,123 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+[project]
+name = "aup-learning-cloud"
+version = "0.1.0"
+description = "AUP Learning Cloud - JupyterHub deployment for AI education"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+# Optional packages for the TUI installer (auplc-installer tui).
+# Without these the installer falls back to a stdlib-only numbered menu.
+installer = [
+    "questionary>=2.0.1",
+    "prompt_toolkit>=3.0.43",
+]
+test = [
+    "pytest>=8.0",
+    "pyyaml>=6.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/installer"]
+pythonpath = ["."]
+
+[tool.ruff]
+# Target Python version
+target-version = "py310"
+
+# Line length
+line-length = 120
+
+# Exclude directories
+exclude = [
+    ".git",
+    ".github",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "node_modules",
+    "*.egg-info",
+    "projects/CV/DL08_Diffusion_Model_new.ipynb",  # Work in progress with syntax errors
+]
+
+[tool.ruff.lint]
+# Enable these rule categories
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "SIM",    # flake8-simplify
+]
+
+# Ignore specific rules
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "B008",   # Do not perform function calls in argument defaults
+    "B905",   # zip() without strict= (Python 3.10+ only)
+    "SIM108", # Use ternary operator (readability preference)
+]
+
+# Notebook-specific rules
+[tool.ruff.lint.per-file-ignores]
+"projects/**/*.ipynb" = [
+    "E402",   # Module level import not at top of file (common in notebooks)
+    "F403",   # 'from module import *' used (teaching notebooks)
+    "F405",   # Name may be undefined (due to import *)
+    "E741",   # Ambiguous variable name (l, O, I are common in teaching)
+    "B007",   # Loop variable not used (common in notebooks)
+    "F841",   # Local variable assigned but never used (exploratory coding)
+    "E731",   # Lambda assignment (teaching pattern)
+    "F821",   # Undefined name (may be defined in earlier cell)
+    "F811",   # Redefinition (notebooks often redefine in different cells)
+    "SIM115", # Use context manager for files (intentional stdout redirect)
+    "UP031",  # Use f-string instead of % format (teaching older style)
+    "E722",   # Bare except (notebooks may use for demo purposes)
+    "F401",   # Imported but unused (conditional imports in notebooks)
+]
+
+"runtime/chart/**/*.py" = [
+    "E402",   # Module level import not at top of file (common in notebooks)
+    "F821",   # Undefined name (get_config is a JupyterHub magic function)
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["jupyterhub_config", "z2jh"]
+
+[tool.ruff.format]
+# Use double quotes for strings
+quote-style = "double"
+
+# Indent with spaces
+indent-style = "space"
+
+# Respect magic trailing commas
+skip-magic-trailing-comma = false
+
+# Unix-style line endings
+line-ending = "auto"

@@ -1,0 +1,97 @@
+{{/*
+Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/}}
+
+{{- /*
+This job has a part to play in a helm upgrade process. It simply waits for the
+hook-image-puller daemonset which is started slightly before this job to get
+its' pods running. If all those pods are running they must have pulled all the
+required images on all nodes as they are used as init containers with a dummy
+command.
+*/}}
+{{- if (include "jupyterhub.imagePuller.daemonset.hook.install" .) -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "jupyterhub.hook-image-awaiter.fullname" . }}
+  labels:
+    {{- include "jupyterhub.labels" . | nindent 4 }}
+    hub.jupyter.org/deletable: "true"
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "10"
+spec:
+  template:
+    # The hook-image-awaiter Job and hook-image-puller DaemonSet was
+    # conditionally created based on this state:
+    #
+    {{- include "jupyterhub.imagePuller.daemonset.hook.install" . | nindent 4 }}
+    #
+    metadata:
+      labels:
+        {{- /* Changes here will cause the Job to restart the pods. */}}
+        {{- include "jupyterhub.matchLabelsLegacyAndModern" . | nindent 8 }}
+        {{- with .Values.prePuller.labels }}
+        {{- . | toYaml | nindent 8 }}
+        {{- end }}
+      {{- with .Values.prePuller.annotations }}
+      annotations:
+        {{- . | toYaml | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      {{- with include "jupyterhub.hook-image-awaiter-serviceaccount.fullname" . }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      {{- with .Values.prePuller.hook.nodeSelector }}
+      nodeSelector:
+        {{- . | toYaml | nindent 8 }}
+      {{- end }}
+      {{- with concat .Values.scheduling.corePods.tolerations .Values.prePuller.hook.tolerations }}
+      tolerations:
+        {{- . | toYaml | nindent 8 }}
+      {{- end }}
+      {{- with include "jupyterhub.imagePullSecrets" (dict "root" . "image" .Values.prePuller.hook.image) }}
+      imagePullSecrets: {{ . }}
+      {{- end }}
+      containers:
+        - image: {{ .Values.prePuller.hook.image.name }}:{{ .Values.prePuller.hook.image.tag }}
+          name: {{ include "jupyterhub.hook-image-awaiter.fullname" . }}
+          {{- with .Values.prePuller.hook.image.pullPolicy }}
+          imagePullPolicy: {{ . }}
+          {{- end }}
+          command:
+            - /image-awaiter
+            - -ca-path=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            - -auth-token-path=/var/run/secrets/kubernetes.io/serviceaccount/token
+            - -api-server-address=https://kubernetes.default.svc:$(KUBERNETES_SERVICE_PORT)
+            - -namespace={{ .Release.Namespace }}
+            - -daemonset={{ include "jupyterhub.hook-image-puller.fullname" . }}
+            - -pod-scheduling-wait-duration={{ .Values.prePuller.hook.podSchedulingWaitDuration }}
+          {{- with .Values.prePuller.hook.containerSecurityContext }}
+          securityContext:
+            {{- . | toYaml | nindent 12 }}
+          {{- end }}
+          {{- with .Values.prePuller.hook.resources }}
+          resources:
+            {{- . | toYaml | nindent 12 }}
+          {{- end }}
+{{- end }}

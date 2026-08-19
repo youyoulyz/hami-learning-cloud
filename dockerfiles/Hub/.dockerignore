@@ -1,0 +1,4 @@
+admin-ui/node_modules
+admin-ui/dist
+.git
+*.md
