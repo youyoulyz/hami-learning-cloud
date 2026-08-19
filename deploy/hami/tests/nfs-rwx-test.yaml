@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: hami-lc-home-nfs
+  labels:
+    type: nfs
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    - nfsvers=4.2
+    - hard
+    - timeo=600
+  nfs:
+    server: nas-server
+    path: ${NAS_HOME_EXPORT}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hami-lc-home
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 200Gi
+  volumeName: hami-lc-home-nfs
+  storageClassName: ""
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nfs-rwx-test
+  namespace: default
+  labels:
+    app: nfs-rwx-test
+spec:
+  containers:
+  - name: tester
+    image: quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6
+    command: ["bash", "-c", "echo \"rw$(date +%s)\" > /home-data/write-test.txt && df -h /home-data | tail -1 && cat /home-data/write-test.txt && sleep 300"]
+    volumeMounts:
+    - name: home-data
+      mountPath: /home-data
+  volumes:
+  - name: home-data
+    persistentVolumeClaim:
+      claimName: hami-lc-home

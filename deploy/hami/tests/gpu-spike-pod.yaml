@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-spike-test
+  namespace: default
+  labels:
+    app: gpu-spike
+spec:
+  schedulerName: hami-scheduler
+  runtimeClassName: nvidia
+  containers:
+  - name: test
+    image: quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6
+    command: ["python3", "-c", "import torch\nprint('GPU:', torch.cuda.get_device_name(0))\nfree, total = torch.cuda.mem_get_info()\nprint(f'vGPU mem: free={free/1024**2:.0f}MB total={total/1024**2:.0f}MB')\ntry:\n    t = torch.empty(int(4500*1024*1024/4), dtype=torch.float32, device='cuda')\n    print('4.5GB alloc: OK (limit NOT enforced)')\n    del t\nexcept RuntimeError as e:\n    print('4.5GB alloc: FAILED as expected ->', str(e).splitlines()[-1][:100])"]
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpumem: "4000"
+        nvidia.com/gpucores: "25"
+      requests:
+        nvidia.com/gpu: "1"
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: all
+  restartPolicy: Never

@@ -1,0 +1,154 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quad-train-scripts
+  namespace: default
+data:
+  hold.py: |
+    import torch, time
+    print('GPU:', torch.cuda.get_device_name(0))
+    free, total = torch.cuda.mem_get_info()
+    print(f'vGPU view: free={free/1024**2:.0f}MB total={total/1024**2:.0f}MB')
+    x = torch.empty(int(3.5*1024**3/4), dtype=torch.float32, device='cuda')
+    print('held', torch.cuda.memory_allocated()/1024**2, 'MB')
+    a = torch.randn(2048, 2048, device='cuda')
+    t0 = time.time()
+    while time.time() - t0 < 90:
+        a = a @ a
+    print('compute loop done, elapsed', time.time() - t0)
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: quad-u1
+  namespace: default
+  labels: {app: quad-train, user: u1}
+  annotations:
+    hami.io/gpu-scheduler-policy: binpack
+spec:
+  schedulerName: hami-scheduler
+  runtimeClassName: nvidia
+  containers:
+  - name: train
+    image: quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6
+    command: ["python3", "/scripts/hold.py"]
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpumem: "4000"
+        nvidia.com/gpucores: "25"
+      requests:
+        nvidia.com/gpu: "1"
+    volumeMounts:
+    - name: scripts
+      mountPath: /scripts
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: all
+  volumes:
+  - name: scripts
+    configMap:
+      name: quad-train-scripts
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: quad-u2
+  namespace: default
+  labels: {app: quad-train, user: u2}
+  annotations:
+    hami.io/gpu-scheduler-policy: binpack
+spec:
+  schedulerName: hami-scheduler
+  runtimeClassName: nvidia
+  containers:
+  - name: train
+    image: quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6
+    command: ["python3", "/scripts/hold.py"]
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpumem: "4000"
+        nvidia.com/gpucores: "25"
+      requests:
+        nvidia.com/gpu: "1"
+    volumeMounts:
+    - name: scripts
+      mountPath: /scripts
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: all
+  volumes:
+  - name: scripts
+    configMap:
+      name: quad-train-scripts
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: quad-u3
+  namespace: default
+  labels: {app: quad-train, user: u3}
+  annotations:
+    hami.io/gpu-scheduler-policy: binpack
+spec:
+  schedulerName: hami-scheduler
+  runtimeClassName: nvidia
+  containers:
+  - name: train
+    image: quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6
+    command: ["python3", "/scripts/hold.py"]
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpumem: "4000"
+        nvidia.com/gpucores: "25"
+      requests:
+        nvidia.com/gpu: "1"
+    volumeMounts:
+    - name: scripts
+      mountPath: /scripts
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: all
+  volumes:
+  - name: scripts
+    configMap:
+      name: quad-train-scripts
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: quad-u4
+  namespace: default
+  labels: {app: quad-train, user: u4}
+  annotations:
+    hami.io/gpu-scheduler-policy: binpack
+spec:
+  schedulerName: hami-scheduler
+  runtimeClassName: nvidia
+  containers:
+  - name: train
+    image: quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6
+    command: ["python3", "/scripts/hold.py"]
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        nvidia.com/gpumem: "4000"
+        nvidia.com/gpucores: "25"
+      requests:
+        nvidia.com/gpu: "1"
+    volumeMounts:
+    - name: scripts
+      mountPath: /scripts
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: all
+  volumes:
+  - name: scripts
+    configMap:
+      name: quad-train-scripts
