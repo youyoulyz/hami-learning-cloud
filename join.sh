@@ -147,7 +147,10 @@ fi
 # 4. GPU stack
 ###############################################################################
 if [[ "$VENDOR" == "amd" ]]; then
-  KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl label node "$(hostname)" --overwrite gpu=on gpu-vendor=amd amd.com/gpu.present=true
+  # AMD nodes must not carry gpu=on: HAMi/DCGM daemonsets select gpu=on and are
+  # NVIDIA-only. The custom AMD time-slice plugin selects amd.com/gpu.present.
+  KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl label node "$(hostname)" --overwrite gpu-vendor=amd amd.com/gpu.present=true
+  KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl label node "$(hostname)" gpu- || true
 else
   KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl label node "$(hostname)" --overwrite gpu=on gpu-vendor=nvidia
 fi
