@@ -442,7 +442,7 @@ def pack_bundle(
     image_tag = sanitize_image_tag(image_tag)
 
     log("===========================================")
-    log("AUP Learning Cloud - Pack Offline Bundle")
+    log("hami-learning-cloud - Pack Offline Bundle")
     log("  Image source: " + ("build" if local_build else "pull"))
     log("===========================================")
 

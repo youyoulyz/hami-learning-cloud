@@ -19,204 +19,102 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -->
 
-# AUP Learning Cloud
+# hami-learning-cloud
 
-> **✨ New UI is coming!** 🚀 Try it now on [https://tpe.aupcloud.io/](https://tpe.aupcloud.io/) 👀
+**AUP Learning Cloud 与 HAMi 的共同后继**：AUP 提供教学云的形态（UI / 课程模型 / 配额体系），
+HAMi 提供 vGPU 硬隔离内核（显存 MB + 算力 % 的 per-container 硬配额）。本项目是两者在
+**消费级 NVIDIA + AMD 异构硬件**上的合体：一个 K3s 集群、一个 JupyterHub、5 张二手卡，
+≈17 个并发教学席位。
 
+> 计划与验收标准见 [`PLAN.md`](PLAN.md)（唯一事实来源），交接背景见 [`HANDOVER.md`](HANDOVER.md)。
 
-AUP Learning Cloud is a tailored JupyterHub deployment designed to provide an intuitive and hands-on AI learning experience. It features a comprehensive suite of AI toolkits running on AMD hardware acceleration, enabling users to learn and experiment with ease.
+## 为什么值得做
 
-![Software Architecture](deploy/docs/images/software-stack.png)
+| # | 论点 | 说明 |
+|---|------|------|
+| 1 | **真隔离** | AUP 官方只有 time-slicing，无显存/算力隔离；本项目用 HAMi 提供 `gpumem` + `gpucores` 硬配额，单卡可承载 4~5 个互不干扰的学生（4 路 4G/25% 已验证） |
+| 2 | **AUP + HAMi 的合体** | 教学云形态与 vGPU 隔离内核第一次在消费级 NVIDIA 硬件上完整落地，两者拼接 delta 极小 |
+| 3 | **架构普适性证明** | AUP `custom.accelerators` 抽象被验证为厂商无关：NV 移植的 delta 收敛在 spawner 一个资源分支 + values 两处，chart / quota / UI / auth 全部零改动 |
+| 4 | **异构车队** | NV+AMD、跨代际（Turing/Ampere/Blackwell/RDNA3）、家用机混部成一个集群——AUP 与 HAMi 官方示例都未覆盖 |
+| 5 | **成本叙事** | 5 张二手/消费级卡 ≈ 17 个并发教学席位（基础档），单机方案做不到 |
+| 6 | **开源遗产（stretch）** | 可向 AUP 上游提 NV/HAMi accelerator backend PR |
 
-## Quick Start
+## 车队与共享机制
 
-The simplest way to deploy AUP Learning Cloud on a single machine in a development or demo environment.
+| 节点 | 卡（显存） | 角色 | 共享机制 |
+|---|---|---|---|
+| N1 | 2070S 8G + 5060Ti 16G | K3s server + GPU 节点 | HAMi vGPU 硬配额 |
+| N2 | 2× RTX 3080 20G | GPU 节点 | HAMi vGPU 硬配额 |
+| N3 | RX 7900 XTX 24G | AMD 节点 | ROCm time-slicing ×3（无显存隔离，UI 已注明） |
 
-### Prerequisites
-- **Hardware**: Supported **Ryzen AI 300 series and above** APUs and **Radeon 9000 series** PCIe GPUs.
-- **Memory**: 32GB+ RAM (64GB recommended)
-- **Storage**: 500GB+ SSD
-- **OS**: Ubuntu 24.04.4 LTS
-- **Docker**: Install Docker and configure for non-root access
-- **TUI deps**: `python3-questionary` and `python3-prompt-toolkit` (apt) for the recommended interactive installer; conda/venv users use `pip install questionary prompt_toolkit`
+- 调度：NV pod → `schedulerName: hami-scheduler`（HAMi extender，vGPU fit/score）；
+  AMD pod → 默认 scheduler（`amd.com/gpu` 为普通 extended resource）。
+- 配额即路由：accelerator 只建 `nvidia`/`amd` 两个（不按 SKU），要 12G 的 pod 自然落不到 8G 卡上。
+- 镜像：nvidia → `quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6`（cu13 覆盖
+  sm_75/sm_86/sm_120，已验证）；amd → `rocm/pytorch` + jupyterlab（[`images/Dockerfile.amd`](images/Dockerfile.amd)）。
 
-```bash
-# Ryzen AI APU only: OEM kernel for ROCm on Ubuntu 24.04 (reboot required)
-sudo apt update && sudo apt install linux-oem-6.14
+## 配额（MVP 最小档）
 
-# Install Docker
-curl -fsSL https://get.docker.com | sh
+| 资源 | 镜像 | GPU 配额 | CPU/Mem | quotaRate |
+|---|---|---|---|---|
+| `cpu` | 同上（不带 GPU 资源） | — | 2C / 4-6G | 1 |
+| `gpu` | nvidia / amd（accelerator override） | nvidia: `gpumem=4000, gpucores=25%`；amd: `amd.com/gpu=1` | 4C / 16G | 2 |
 
-# Add current user to docker group
-sudo usermod -aG docker $USER
+HAMi 单位：`nvidia.com/gpumem`=MB、`nvidia.com/gpucores`=%。中档（8000/50%）、大档（12000/75%）
+架构支持，values 加行即可（MVP 不做）。
 
-# Apply group changes without logout (or logout/login instead)
-newgrp docker
+## 快速开始
 
-# Install Build Tools
-sudo apt install build-essential
-
-# TUI dependencies (required for the recommended interactive install)
-sudo apt install python3-questionary python3-prompt-toolkit
-```
-
-> **Kernel note** (Ryzen AI APU only): The OEM kernel package follows AMD ROCm's Ryzen APU installation guidance for Ubuntu 24.04. See the [ROCm 7.13.0 preview installation guide for Ryzen APUs](https://rocm.docs.amd.com/en/7.13.0-preview/install/rocm.html?fam=ryzen&w=compute&os=ubuntu&ubuntu-ver=24.04&i=pkgman&gpu=max-pro-395&gfx=gfx1151) for details. Radeon dGPU systems typically use the stock Ubuntu kernel—check ROCm docs for your GPU.
->
-> **Docker note**: See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linux-postinstall/) and [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/) for details.
->
-> **TUI note**: **System Python (apt):** install `python3-questionary` and `python3-prompt-toolkit` as shown above. **Conda or virtualenv users:** use `pip install questionary prompt_toolkit` inside your active environment instead of the apt packages. These are required for the interactive TUI; non-interactive `./auplc-installer install` does not need them.
-
-### Installation
-
-**Interactive (recommended):**
+单节点开发环境（AUP installer 路径，详见 `auplc-installer`）：
 
 ```bash
-git clone https://github.com/AMDResearch/aup-learning-cloud.git
-cd aup-learning-cloud
-./auplc-installer                      # pick Install, accept defaults, set Image tag to develop
+git clone <this repo> && cd hami-learning-cloud
+./auplc-installer        # TUI 交互安装
 ```
 
-**Non-interactive:**
+多节点 GPU 集群：
 
 ```bash
-git clone https://github.com/AMDResearch/aup-learning-cloud.git
-cd aup-learning-cloud
-./auplc-installer install
+# master 已在 N1；新节点一行加入（P1 交付 join.sh 后启用）
+./join.sh <node>
 ```
 
-A successful install looks like this:
+用户 home 持久化：TrueNAS NFS RWX（`<NAS_SHARE>/.../home/<user>`），pod 重建数据不丢。
+公网入口：cloudflared tunnel（`publicScheme=https` + allowedOrigins）。
 
-```text
-This operation needs root privileges. Requesting sudo password...
-  ✓ [1/8] Detecting GPU  (0.2s)
-  ✓ [2/8] Generating values overlay (initial)  (0.0s)
-  ✓ [3/8] Installing helm + k9s  (0.0s)
-  ✓ [4/8] Installing K3s (single-node)  (3.8s)
-  ✓ [5/8] Pulling custom + external images  (25.0s)
-  ✓ [6/8] Deploying ROCm GPU device plugin + node labeller  (0.2s)
-  ✓ [7/8] Refreshing values overlay from node labels  (0.2s)
-  ✓ [8/8] Deploying JupyterHub runtime (helm install + wait)  (9.2s)
+## 目录
 
-   _    _   _ ____    _                          _                  ____ _                 _
-  / \  | | | |  _ \  | |    ___  __ _ _ __ _ __ (_)_ __   __ _     / ___| | ___  _   _  __| |
- / _ \ | | | | |_) | | |   / _ \/ _` | '__| '_ \| | '_ \ / _` |   | |   | |/ _ \| | | |/ _` |
-/ ___ \| |_| |  __/  | |__|  __/ (_| | |  | | | | | | | | (_| |   | |___| | (_) | |_| | (_| |
-/_/   \_\___/|_|     |_____\___|\__,_|_|  |_| |_|_|_| |_|\__, |    \____|_|\___/ \__,_|\__,_|
-                                                         |___/
-    You have successfully installed AUP Learning Cloud!
-
-    Open in your browser: http://localhost:30890
-    (auto-logged-in as 'student' — no login needed)
-
-    kubectl is configured at $HOME/.kube/config; try `kubectl get nodes`
+```
+runtime/            AUP runtime（hub core + React 前端 + Z2JH chart fork，零改动）
+  hub/core/         spawner / quota / handlers / auth（NV/AMD 移植点收敛在 spawner 资源分支）
+  chart/            Z2JH 4.3.3 fork — 零改动原则
+projects/           课程（CV / DL / LLM / PhySim，沿用 AUP 课程）
+images/             本项目自定义镜像（Dockerfile.amd）
+deploy/             部署脚本 / manifests / Ansible
+scripts/            用户批量管理、values schema 生成、资源契约校验
+auplc-installer/    Python 单节点 installer（TUI）
+PLAN.md             实施计划 v1.0（唯一事实来源）
+HANDOVER.md         3080 → 2070 机器交接书
 ```
 
-See the full guide at [Quick Start](https://amdresearch.github.io/aup-learning-cloud/installation/quick-start.html) and [Single-Node Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/single-node.html).
+## 路线图
 
-### Uninstall
-
-```bash
-./auplc-installer uninstall
-```
-
-## Cluster Installation
-For multi-node cluster installation or need more control over the deployment process:
-
-- [Multi-Node Cluster Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/multi-node.html) - Production deployment with Ansible playbooks
-
-## Learning Solution
-
-AUP Learning Cloud offers the following Learning Toolkits:
-
-- [**Computer Vision**](projects/CV) \
-Includes 10 hands-on labs covering common computer vision concepts and techniques.
-
-- [**Deep Learning**](projects/DL) \
-Includes 12 hands-on labs covering common deep learning concepts and techniques.
-
-- [**Large Language Model from Scratch**](projects/LLM) \
-Includes 9 hands-on labs designed to teach LLM development from scratch.
-
-- [**Physical Simulation**](projects/PhySim) \
-Hands-on labs for physics simulation and robotics using Genesis.
-
-## Key Features
-
-### Hardware Acceleration
-
-AUP Learning Cloud provides a multi-user Jupyter notebook environment with the following hardware acceleration:
-
-- **AMD GPU**: Leverage ROCm for high-performance deep learning and AI workloads.
-- **AMD NPU**: Utilize Ryzen™ AI for efficient neural processing unit tasks.
-- **AMD CPU**: Support for general-purpose CPU-based computations.
-
-### Flexible Deployment
-
-Kubernetes provides a robust infrastructure for deploying and managing JupyterHub. We support both single-node and multi-node K3s cluster deployments.
-
-### Authentication
-
-Seamless integration with GitHub Single Sign-On (SSO) and Native Authenticator for secure and efficient user authentication.
-- **Auto-admin on install**: Initial admin created automatically with random password
-- **Dual login**: GitHub App + Native accounts on single login page
-- **Batch user management**: CSV/Excel-based bulk operations via scripts
-
-### Storage Management and Security
-
-Dynamic NFS provisioning ensures scalable and persistent storage for user data, while end-to-end TLS encryption with automated certificate management guarantees secure and reliable communication.
-
-## Available Notebook and Coding Environments
-
-Current environments are configured via `custom.resources.images` in `runtime/values.yaml`. These settings should be consistent with `prePuller.extraImages`.
-
-| Environment | Image                                    | Hardware                        |
-| ----------- | ---------------------------------------- | ------------------------------- |
-| Base CPU    | `ghcr.io/amdresearch/auplc-default` | CPU                             |
-| GPU Base    | `ghcr.io/amdresearch/auplc-base`   | GPU                             |
-| Code CPU    | `ghcr.io/amdresearch/auplc-code-cpu` | CPU                             |
-| Code GPU    | `ghcr.io/amdresearch/auplc-code-gpu` | GPU                             |
-| CV COURSE   | `ghcr.io/amdresearch/auplc-cv`    | GPU |
-| DL COURSE   | `ghcr.io/amdresearch/auplc-dl`    | GPU |
-| LLM COURSE  | `ghcr.io/amdresearch/auplc-llm`   | GPU                |
-| PhySim COURSE | `ghcr.io/amdresearch/auplc-physim` | GPU               |
-
-The `auplc-default`, `auplc-base`, and `Course-*` images remain notebook and course focused. Browser-based coding is provided by generic code-server images instead of per-course VS Code image variants. Resources launch code-server when their `custom.resources.metadata.<resource>.launchMode` is set to `code-server`; the default configuration uses `code-cpu` for CPU-only coding workspaces and `code-gpu` for GPU-accelerated coding workspaces.
-
-Build the images:
-
-```bash
-./auplc-installer img build base-rocm --gpu=strix
-```
-
-The code-server container starts on port `8888` with `code-server --auth none`. This is safe only when the user pod is reachable exclusively through JupyterHub and the JupyterHub proxy authentication boundary. Do not expose the code-server pod port directly through a NodePort, LoadBalancer, ingress, or other unauthenticated route.
-
-The code images install the built-in extension list from `dockerfiles/Code/extensions.txt` plus local `.vsix` packages such as the AUPLC Back-to-Hub extension. Before adding or distributing additional VS Code, OpenVSX, or Marketplace extensions, confirm their licenses and marketplace terms are compatible with your deployment and redistribution model.
-
-## Documentation
-
-Full documentation is available at: **https://amdresearch.github.io/aup-learning-cloud/**
-
-- [Deployment Guide](deploy/README.md) - Single-node and multi-node deployment
-- [Configuration Reference](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/configuration-reference.html) - `runtime/values.yaml` field reference
-- [Authentication Guide](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/authentication-guide.html) - GitHub App and native authentication
-- [User Management Guide](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/user-management.html) - Batch user operations with scripts
-- [User Quota System](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/quota-system.html) - Resource usage tracking and quota management
+P0 仓库与品牌 → P1 集群 + GPU 栈（N1/N3，N2 恢复后补齐）→ P2 AUP runtime 移植 +
+dummy 三路径 spawn → P3 镜像契约 + spawn 全链路 → P4 配额 + 监控 + 用户管理 →
+P5 TLS + 运维手册 + Demo + 报告。各阶段验收标准见 [PLAN.md §5](PLAN.md)。
 
 ## Contributing
 
-Please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute to the project.
+见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## Acknowledgment
 
-AUP would like to thank the following universities and professors. This learning solution was made possible through the joint efforts of these partners.
+本项目 fork 自 [AUP Learning Cloud](https://github.com/AMDResearch/aup-learning-cloud)
+（AMD，MIT），并复用其课程套件：
 
 | University | Professors and Labs | Toolkits |
 |---|---|---|
 | National Taiwan University | [Prof. Chun-Yi Lee](https://www.csie.ntu.edu.tw/en/member/Faculty/Chun-Yi-Lee-67240464), [ELSA Lab](https://elsalab.ai/) | DL, CV |
 | Nanjing University | [Prof. Jingwei Xu](https://njudeepengine.github.io/jingweixu/), [NJUDeepEngine](https://github.com/NJUDeepEngine) | LLM |
 
-The following repositories and icons are used in AUP Learning Cloud, either in close to original form or as an inspiration:
-
-* [Genesis](https://github.com/Genesis-Embodied-AI/Genesis)
-
-* [Flaticon](https://www.flaticon.com): deployment (Prashanth Rapolu 15, Freepik), team & user (Freepik), machine learning (Becris).
+GPU 隔离内核来自 [HAMi](https://github.com/Project-HAMi/HAMi)（v2.9.0）。

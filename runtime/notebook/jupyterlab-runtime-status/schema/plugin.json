@@ -1,5 +1,5 @@
 {
-  "title": "AUP Learning Cloud Runtime Status",
+  "title": "hami-learning-cloud Runtime Status",
   "description": "Settings for the runtime countdown shown in the JupyterLab status bar.",
   "type": "object",
   "additionalProperties": false,

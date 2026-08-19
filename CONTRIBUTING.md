@@ -19,9 +19,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -->
 
-# Contributing to AUP Learning Cloud
+# Contributing to hami-learning-cloud
 
-Thank you for your interest in contributing to AUP Learning Cloud! This document provides guidelines and setup instructions for developers.
+Thank you for your interest in contributing to hami-learning-cloud! This document provides guidelines and setup instructions for developers.
 
 ## Development Setup
 
@@ -216,20 +216,20 @@ Standard production code rules apply to:
 
 ## Platform Attribution
 
-AUP Learning Cloud uses a **multi-layer attribution system** to ensure the platform identity
+hami-learning-cloud uses a **multi-layer attribution system** to ensure the platform identity
 remains visible to end users regardless of how the codebase is modified.
 
 When contributing, please preserve all four layers:
 
 | Layer | File | What |
 |-------|------|------|
-| HTTP header | `runtime/hub/core/jupyterhub_config.py` | `X-Powered-By: AUP Learning Cloud` |
+| HTTP header | `runtime/hub/core/jupyterhub_config.py` | `X-Powered-By: hami-learning-cloud` |
 | API endpoint | `runtime/hub/core/handlers.py` | `PlatformInfoHandler` at `/api/platform` |
 | HTML footer | `runtime/hub/frontend/templates/page.html` | `#auplc-powered-by-footer` |
 | Frontend constants | `runtime/hub/frontend/packages/shared/src/branding.ts` | `PLATFORM_NAME` etc. |
 
 When adding new UI pages or React apps, import `PLATFORM_NAME` from `@auplc/shared`
-rather than hardcoding the string `"AUP Learning Cloud"`.
+rather than hardcoding the string `"hami-learning-cloud"`.
 
 For AI agent guidance, see [`AGENTS.md`](./AGENTS.md).
 

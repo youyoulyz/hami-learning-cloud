@@ -32,7 +32,7 @@ const sharedMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@auplc/shared", () => ({
-  PLATFORM_NAME: "AUP Learning Cloud",
+  PLATFORM_NAME: "hami-learning-cloud",
   fetchPlatformInfo: sharedMocks.fetchPlatformInfo,
   getNotifications: sharedMocks.getNotifications,
   getMyQuota: sharedMocks.getMyQuota,
@@ -111,7 +111,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   sharedMocks.fetchPlatformInfo.mockResolvedValue({
-    platform: "AUP Learning Cloud",
+    platform: "hami-learning-cloud",
   });
   sharedMocks.getMyQuota.mockResolvedValue(null);
   sharedMocks.getMyUsage.mockResolvedValue(null);
@@ -157,7 +157,7 @@ describe("App homepage notifications", () => {
             dismissible: false,
             format: "markdown",
             eyebrow: "Platform",
-            titleHtml: "<p>Welcome to AUP Learning Cloud</p>",
+            titleHtml: "<p>Welcome to hami-learning-cloud</p>",
             messageHtml: "<p>Get started with GPU-accelerated Jupyter notebooks powered by AMD ROCm technology.</p>",
             link: null,
             startsAt: null,
@@ -215,7 +215,7 @@ describe("App homepage notifications", () => {
 
     const updatesRail = await screen.findByRole("region", { name: /News & Updates/i });
     expect(updatesRail.getAttribute("tabindex")).toBe("0");
-    expect(within(updatesRail).getAllByText("Welcome to AUP Learning Cloud")).toHaveLength(1);
+    expect(within(updatesRail).getAllByText("Welcome to hami-learning-cloud")).toHaveLength(1);
     expect(within(updatesRail).getByText("Platform").textContent).toBe("Platform");
     expect(within(updatesRail).getByRole("heading", { name: /Scheduled maintenance/i })).not.toBeNull();
     expect(within(updatesRail).getByText("Announcement").textContent).toBe("Announcement");

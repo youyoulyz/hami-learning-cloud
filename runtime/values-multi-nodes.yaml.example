@@ -56,8 +56,8 @@ custom:
   # - multi: GitHub App + native first-use accounts
   authMode: "multi"
 
-  # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
-  # Example: "City/University" → "AUP Learning Cloud City/University"
+  # Cluster display name (optional). Appended to "hami-learning-cloud" in the UI.
+  # Example: "City/University" → "hami-learning-cloud City/University"
   clusterName: ""
 
   # GitHub organization name for team-based resource access
@@ -421,7 +421,7 @@ hub:
       mountPath: /usr/local/share/jupyterhub/static/announcement.txt
       stringData: |
           <div class="announcement-box" style="padding: 1em; border: 1px solid #ccc; border-radius: 6px; background-color: #f8f8f8;">
-          <h3>Welcome to AUP Learning Cloud!</h3>
+          <h3>Welcome to hami-learning-cloud!</h3>
           <p>Edit this announcement in <code>values-multi-nodes.yaml</code></p>
           </div>
 

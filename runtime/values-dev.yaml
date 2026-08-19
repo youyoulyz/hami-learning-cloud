@@ -17,7 +17,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# AUP Learning Cloud - Development Overlay
+# hami-learning-cloud - Development Overlay
 #
 # Dev-friendly settings for local development and UI iteration.
 # Layered on top of values.yaml:

@@ -22,7 +22,7 @@ SOFTWARE.
 
 # Deployment
 
-This directory contains infrastructure code for deploying AUP Learning Cloud.
+This directory contains infrastructure code for deploying hami-learning-cloud.
 
 ## Directory Structure
 

@@ -2,7 +2,7 @@
   "name": "@auplc/jupyterlab-runtime-status",
   "private": true,
   "version": "0.0.0",
-  "description": "JupyterLab runtime status prebuilt extension for AUP Learning Cloud notebooks",
+  "description": "JupyterLab runtime status prebuilt extension for hami-learning-cloud notebooks",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",

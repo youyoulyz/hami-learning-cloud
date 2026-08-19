@@ -19,9 +19,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -->
 
-# AUP Learning Cloud Code Images
+# hami-learning-cloud Code Images
 
-This directory defines the generic browser coding environments for AUP Learning Cloud. They run `code-server` directly as the single-user process behind JupyterHub.
+This directory defines the generic browser coding environments for hami-learning-cloud. They run `code-server` directly as the single-user process behind JupyterHub.
 
 ## Image Model
 

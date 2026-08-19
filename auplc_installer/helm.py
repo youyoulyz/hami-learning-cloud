@@ -53,7 +53,7 @@ def _helm_install_args(paths: RuntimePaths, *, dev: bool = False) -> list[str]:
 
 def deploy_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
     """Initial Helm install of JupyterHub. Waits for hub/proxy/scheduler ready."""
-    msg = "Deploying AUP Learning Cloud Runtime"
+    msg = "Deploying hami-learning-cloud Runtime"
     if dev:
         msg += " (dev mode)"
     log(msg + "...")

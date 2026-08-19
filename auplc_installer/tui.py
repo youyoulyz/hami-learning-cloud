@@ -715,7 +715,7 @@ def _flow_pack(state: InstallerState, source_root) -> None:
 
 def _flow_uninstall(state: InstallerState) -> None:
     if not _ask_confirm(
-        "Uninstall AUP Learning Cloud (Helm release + K3s + dummy0)?",
+        "Uninstall hami-learning-cloud (Helm release + K3s + dummy0)?",
         default=False,
     ):
         raise _CancelledError
@@ -890,7 +890,7 @@ _MAIN_CHOICES: tuple[Choice, ...] = (
 
 def _print_banner() -> None:
     log(cyan("=========================================================="))
-    log(bold_cyan(" AUP Learning Cloud Installer"))
+    log(bold_cyan(" hami-learning-cloud Installer"))
     if not HAS_QUESTIONARY:
         log(dim(" (running with stdlib fallback; install `questionary` for"))
         log(dim("  a smoother UI: pipx install questionary)"))

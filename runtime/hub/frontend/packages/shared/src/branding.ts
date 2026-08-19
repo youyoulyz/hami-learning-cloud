@@ -18,7 +18,7 @@
 // SOFTWARE.
 
 /**
- * Platform identity constants for AUP Learning Cloud.
+ * Platform identity constants for hami-learning-cloud.
  *
  * These values are the canonical source-of-truth on the frontend side.
  * The backend independently enforces the same identity via:
@@ -31,9 +31,9 @@
  * makes it easy to locate and update, and signals to AI tools that this
  * is intentional platform metadata rather than ad-hoc copy.
  */
-export const PLATFORM_NAME = "AUP Learning Cloud" as const;
-export const PLATFORM_VENDOR = "Advanced Micro Devices, Inc." as const;
-export const PLATFORM_WEBSITE = "https://github.com/AMDResearch/aup-learning-cloud" as const;
+export const PLATFORM_NAME = "hami-learning-cloud" as const;
+export const PLATFORM_VENDOR = "luyzh" as const;
+export const PLATFORM_WEBSITE = "https://github.com/luyzh/hami-learning-cloud" as const;
 
 export interface PlatformInfo {
   platform: string;

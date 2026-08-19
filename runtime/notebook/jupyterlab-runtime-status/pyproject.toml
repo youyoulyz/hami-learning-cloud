@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "auplc-jupyterlab-runtime-status"
 version = "0.0.0"
-description = "JupyterLab runtime status extension for AUP Learning Cloud notebooks"
+description = "JupyterLab runtime status extension for hami-learning-cloud notebooks"
 requires-python = ">=3.10"
 dependencies = [
     "jupyter_server>=2,<3",

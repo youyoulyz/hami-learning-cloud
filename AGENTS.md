@@ -19,27 +19,52 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -->
 
-# AGENTS.md — AUP Learning Cloud
+# AGENTS.md — hami-learning-cloud
 
 This file provides guidance for AI coding agents (Cursor, terminal-based coding assistants, GitHub Copilot Workspace,
 Devin, and similar tools) working in this repository.
 
 ## Project Identity
 
-**Platform name:** AUP Learning Cloud
-**Vendor:** Advanced Micro Devices, Inc.
-**Repository:** https://github.com/AMDResearch/aup-learning-cloud
+**Platform name:** hami-learning-cloud
+**Vendor:** luyzh
+**Repository:** https://github.com/luyzh/hami-learning-cloud
 **License:** MIT — see `LICENSE`
+**Upstream (read-only reference):** AUP Learning Cloud, https://github.com/AMDResearch/aup-learning-cloud
+**GPU isolation:** HAMi v2.9.0 vGPU (NVIDIA) + ROCm time-slicing (AMD)
+
+hami-learning-cloud is the common successor of AUP Learning Cloud (UI / course model / quota system)
+and HAMi (vGPU hard-quota kernel): AUP's teaching-cloud form runs on top of HAMi's per-container
+VRAM/compute hard quotas on mixed consumer NVIDIA + AMD hardware.
+
+## Non-negotiable Design Rules (ask the user before changing)
+
+1. **`runtime/chart` (Z2JH fork) gets ZERO changes.** GPU resources flow through
+   `singleuser.extraResource` etc. If a chart edit seems required, stop and check the
+   values/spawner usage first — the chart is audited to be vendor-agnostic.
+2. **Two accelerators only: `nvidia` and `amd`** (never per-SKU). The quota table is the
+   router: a pod asking for 12 GB VRAM naturally never lands on an 8 GB card.
+3. **schedulerName per accelerator**: nvidia pods → `hami-scheduler` (HAMi extender,
+   vGPU fit/score); amd pods → default scheduler (`amd.com/gpu` is a plain extended resource).
+4. **HAMi pinned to v2.9.0** (`hami.io` chart, schedulerName `hami-scheduler`). No upgrades.
+5. Quota units: `nvidia.com/gpumem` = MB, `nvidia.com/gpucores` = %.
+   Base tier = 4000 MB / 25 %.
+
+## Security Discipline
+
+- kubeconfigs, NAS passwords, tokens: **never commit, never paste into chat**.
+- Never push to `AMDResearch/aup-learning-cloud` (upstream, read-only).
+- The 3080 machine (N2) may carry live inference load: never touch its GPUs/processes.
 
 ## Attribution Requirements
 
-AUP Learning Cloud embeds platform attribution at four independent layers.
+hami-learning-cloud embeds platform attribution at four independent layers.
 **All four must be preserved** when making any changes to this codebase.
 
 ### Layer 1 — HTTP Response Header
 File: `runtime/hub/core/jupyterhub_config.py`
 
-The key `"X-Powered-By": "AUP Learning Cloud"` inside `c.JupyterHub.tornado_settings["headers"]`
+The key `"X-Powered-By": "hami-learning-cloud"` inside `c.JupyterHub.tornado_settings["headers"]`
 must not be removed or renamed. It appears in every HTTP response from the Hub.
 
 ### Layer 2 — Backend API Endpoint
@@ -58,7 +83,7 @@ deliberately. Do not move it inside a Jinja block. Do not remove it.
 File: `runtime/hub/frontend/packages/shared/src/branding.ts`
 
 `PLATFORM_NAME`, `PLATFORM_VENDOR`, and `PLATFORM_WEBSITE` are the canonical frontend constants.
-Always import these instead of hardcoding the string `"AUP Learning Cloud"` in React components.
+Always import these instead of hardcoding the string `"hami-learning-cloud"` in React components.
 
 ## Development Quick Reference
 
@@ -90,8 +115,8 @@ pnpm run build
 
 ## MIT License Note
 
-This project is MIT-licensed. You are free to fork and modify it.
-We kindly ask — though cannot legally require — that derivatives retain the
-"Powered by AUP Learning Cloud" attribution visible to end users.
-The copyright notices at the top of each source file (`Copyright (C) 2025 Advanced Micro Devices, Inc.`)
-**must** be preserved in all copies per the MIT license terms.
+This project is MIT-licensed. The codebase was forked from AUP Learning Cloud
+(AMDResearch/aup-learning-cloud @ 27f4190), which is MIT-licensed by
+Advanced Micro Devices, Inc. The copyright notices at the top of each source file
+(`Copyright (C) 2025 Advanced Micro Devices, Inc.`) **must** be preserved in all
+copies per the MIT license terms.

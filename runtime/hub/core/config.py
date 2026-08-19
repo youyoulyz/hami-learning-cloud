@@ -386,7 +386,7 @@ class HubConfig:
 
     @property
     def platform_display_name(self) -> str:
-        base = "AUP Learning Cloud"
+        base = "hami-learning-cloud"
         if self.cluster_name:
             return f"{base} {self.cluster_name}"
         return base

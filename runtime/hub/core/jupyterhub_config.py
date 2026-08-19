@@ -106,7 +106,7 @@ _BASE_TORNADO_SETTINGS: dict = {
         ),
         # Platform attribution — survives frontend rewrites because it is set
         # at the Tornado application layer, not in any template or React component.
-        "X-Powered-By": "AUP Learning Cloud",
+        "X-Powered-By": "hami-learning-cloud",
     },
 }
 
@@ -151,7 +151,7 @@ c.JupyterHub.tornado_settings = {
 
 # Inject platform identity into every Jinja template context so that
 # {{ powered_by }} is available in all Hub-rendered pages.
-c.JupyterHub.template_vars = {"powered_by": "AUP Learning Cloud"}
+c.JupyterHub.template_vars = {"powered_by": "hami-learning-cloud"}
 
 # Database configuration
 db_type = z2jh.get_config("hub.db.type")

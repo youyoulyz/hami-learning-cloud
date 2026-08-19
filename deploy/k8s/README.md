@@ -22,7 +22,7 @@ SOFTWARE.
 
 # Kubernetes Components
 
-Kubernetes resource configurations for AUP Learning Cloud cluster.
+Kubernetes resource configurations for hami-learning-cloud cluster.
 
 For full instructions, see [Multi-Node Cluster Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/multi-node.html).
 

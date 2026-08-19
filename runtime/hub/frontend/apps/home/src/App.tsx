@@ -713,7 +713,7 @@ function App() {
                 </a>
                 <a
                   className="doc-item"
-                  href="https://amdresearch.github.io/aup-learning-cloud/"
+                  href="https://github.com/luyzh/hami-learning-cloud"
                   target="_blank"
                   rel="noopener"
                 >
@@ -724,13 +724,13 @@ function App() {
                     <i className="fa fa-laptop"></i>
                   </div>
                   <div className="doc-text">
-                    <h4>AUP Learning Cloud User Guide</h4>
+                    <h4>hami-learning-cloud User Guide</h4>
                     <p>Notebooks, terminals &amp; extensions</p>
                   </div>
                 </a>
                 <a
                   className="doc-item"
-                  href="https://amdresearch.github.io/aup-learning-cloud/installation/single-node.html"
+                  href="https://github.com/luyzh/hami-learning-cloud#quick-start"
                   target="_blank"
                   rel="noopener"
                 >
@@ -742,12 +742,12 @@ function App() {
                   </div>
                   <div className="doc-text">
                     <h4>Platform Getting Started</h4>
-                    <p>First-time user guide for AUP Learning Cloud setup</p>
+                    <p>First-time user guide for hami-learning-cloud setup</p>
                   </div>
                 </a>
                 <a
                   className="doc-item"
-                  href="https://github.com/AMDResearch/aup-learning-cloud"
+                  href="https://github.com/luyzh/hami-learning-cloud"
                   target="_blank"
                   rel="noopener"
                 >
@@ -758,8 +758,8 @@ function App() {
                     <i className="fa fa-code-fork"></i>
                   </div>
                   <div className="doc-text">
-                    <h4>AUP Learning Cloud GitHub Repository</h4>
-                    <p>Clone &amp; launch your own AUP Learning Cloud</p>
+                    <h4>hami-learning-cloud GitHub Repository</h4>
+                    <p>Clone &amp; launch your own GPU learning cloud</p>
                   </div>
                 </a>
               </div>

@@ -32,7 +32,7 @@ const sharedMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@auplc/shared", () => ({
-  PLATFORM_NAME: "AUP Learning Cloud",
+  PLATFORM_NAME: "hami-learning-cloud",
   fetchPlatformInfo: sharedMocks.fetchPlatformInfo,
   getNotifications: sharedMocks.getNotifications,
   getMyQuota: sharedMocks.getMyQuota,
@@ -81,7 +81,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   sharedMocks.fetchPlatformInfo.mockResolvedValue({
-    platform: "AUP Learning Cloud",
+    platform: "hami-learning-cloud",
   });
   sharedMocks.getNotifications.mockResolvedValue({
     enabled: true,
@@ -186,7 +186,7 @@ describe("App resource list", () => {
     await renderApp();
 
     await act(async () => {
-      platformInfo.resolve({ platform: "AUP Learning Cloud" });
+      platformInfo.resolve({ platform: "hami-learning-cloud" });
       quota.resolve(null);
       notifications.resolve({
         enabled: true,

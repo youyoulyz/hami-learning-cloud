@@ -17,7 +17,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""auplc-installer: Python implementation of the AUP Learning Cloud installer.
+"""auplc-installer: Python implementation of the hami-learning-cloud installer.
 
 Drop-in replacement for the legacy bash ``auplc-installer`` script. Same CLI
 surface (subcommands, flags, environment variables) so existing automation,

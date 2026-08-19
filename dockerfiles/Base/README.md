@@ -19,7 +19,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -->
 
-# AUP Learning Cloud Base Images
+# hami-learning-cloud Base Images
 
 ## GPU Base Image (`Dockerfile.rocm`)
 

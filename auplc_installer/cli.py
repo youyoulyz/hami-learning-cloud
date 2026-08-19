@@ -213,7 +213,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="auplc-installer",
         add_help=False,
-        description="AUP Learning Cloud installer (Python).",
+        description="hami-learning-cloud installer (Python).",
     )
     # Global flags
     p.add_argument("--gpu", dest="gpu_type", default=None)
@@ -423,7 +423,7 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
 def _print_success_banner() -> None:
     """Show the post-install celebration / next-steps panel.
 
-    The full "AUP Learning Cloud" figlet logo, a "ready" message, and the
+    The full "hami-learning-cloud" figlet logo, a "ready" message, and the
     URL the user should open. Generated with
     https://patorjk.com/software/taag/#p=display&h=0&f=Standard&t=AUP%20Learning%20Cloud
     (matches the helm chart's NOTES.txt).
@@ -444,7 +444,7 @@ def _print_success_banner() -> None:
     log("")
     for line in logo.splitlines():
         log(bold_cyan(line))
-    log("    " + bold_green("You have successfully installed AUP Learning Cloud!"))
+    log("    " + bold_green("You have successfully installed hami-learning-cloud!"))
     log("")
     log("    " + bold("Open in your browser: ") + bold_cyan("http://localhost:30890"))
     log("    " + dim("(auto-logged-in as 'student' — no login needed)"))

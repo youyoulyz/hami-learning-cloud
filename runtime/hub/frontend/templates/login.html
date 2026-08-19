@@ -33,7 +33,7 @@ SOFTWARE.
 {% endblock login_widget %}
 
 {%- block title -%}
-{{ platform_name or 'AUP Learning Cloud' }}
+{{ platform_name or 'hami-learning-cloud' }}
 {%- endblock title -%}
 
 {% block stylesheet %}
@@ -89,7 +89,7 @@ SOFTWARE.
                 <polygon class="cls-1"
                     points="115.74 23.98 115.74 10.9 106.4 20.24 106.4 33.33 119.48 33.33 128.82 23.98 115.74 23.98" />
             </svg>
-            <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">{{ platform_name or 'AUP Learning Cloud' }}</h2>
+            <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">{{ platform_name or 'hami-learning-cloud' }}</h2>
             <p class="text-blue-100 mb-8">Experience the next generation of AI acceleration with AMD ROCm™.</p>
             {% if login_service and not authenticator_mode.startswith('multi') %}
             <a role="button"
@@ -129,7 +129,7 @@ SOFTWARE.
             </script>
             <div class="login-card rounded-xl shadow-lg p-8">
                 <div class="text-center mb-8">
-                    <h1 class="login-heading text-2xl font-bold">Login to {{ platform_name or 'AUP Learning Cloud' }}</h1>
+                    <h1 class="login-heading text-2xl font-bold">Login to {{ platform_name or 'hami-learning-cloud' }}</h1>
                     {% if authenticator_mode == 'dummy' %}
                     <p class="login-dev-mode text-sm mt-2">⚠️ Development Mode - Any username/password accepted</p>
                     {% endif %}
