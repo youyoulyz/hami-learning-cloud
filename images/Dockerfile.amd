@@ -1,9 +1,10 @@
 # AMD (7900 XTX / gfx1101) 课程镜像 — hami-learning-cloud
-# 基线: rocm/pytorch (官方 ROCm PyTorch 镜像, 含 gfx1101 kernel; ROCm 6.2+ 支持 RDNA3)
+# 基线: rocm/pytorch (官方 ROCm PyTorch 镜像, ROCm 7.2.4 / PyTorch 2.10.0)
 # 用法: docker build -t <registry>/hami-lc-amd:v1 -f Dockerfile.amd .
 #       docker push <registry>/hami-lc-amd:v1
-# P1 验收: 在 N3 (7900XTX) 内先裸跑 `python -c "import torch; print(torch.cuda.is_available())"` 确认真实可用, 再进集群
-FROM rocm/pytorch:2.7.1-rocm6.3
+# N3 拉取如遇 Docker Hub 403，可使用同 tag 的 SWR mirror:
+#   swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0
+FROM rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0
 
 # jupyterlab 作为 JupyterHub singleuser 入口; 鉴权边界 = hub proxy (AUP code-server 同款模式)
 RUN pip install --no-cache-dir jupyterlab

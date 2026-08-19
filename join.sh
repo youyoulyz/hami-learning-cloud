@@ -2,7 +2,7 @@
 # hami-learning-cloud: one-command GPU node join.
 #
 # Usage (on the joining node):
-#   sudo ./join.sh --server 192.168.X.1 --token <K3S_TOKEN> [--vendor nvidia|amd] [--force]
+#   sudo ./join.sh --server 192.168.X.1 --token <K3S_TOKEN> [--vendor nvidia|amd] [--force] [--nas-mount /opt/hami-lc-home]
 #
 # K3S_TOKEN on the master (N1):  sudo cat /var/lib/rancher/k3s/server/token
 #
@@ -13,9 +13,9 @@
 #   4. installs the per-vendor GPU stack:
 #        nvidia: nvidia-container-toolkit (CDI + containerd runtime), labels gpu=on
 #                (cluster-scoped HAMi daemonsets pick the node up automatically)
-#        amd:    ROCm k8s-device-plugin with time-slicing (sliceCount from env, default 3),
-#                labels gpu=on + gpu-vendor=amd
-#   5. mounts the NAS home share (NFS) if absent
+#        amd:    hami-learning-cloud AMD time-slicing device plugin (custom binary),
+#                labels gpu=on + gpu-vendor=amd + amd.com/gpu.present=true
+#   5. mounts the NAS home share (NFS) if absent (default /opt/hami-lc-home)
 set -euo pipefail
 
 K3S_VERSION="v1.35.4+k3s1"
@@ -26,8 +26,9 @@ FORCE=0
 SLICE_COUNT="${SLICE_COUNT:-3}"
 NAS_SERVER="nas-server"
 NAS_HOME_EXPORT="${NAS_HOME_EXPORT}"
-NAS_HOME_MOUNT="/home"
-AMD_PLUGIN_IMAGE="rocm/k8s-device-plugin:v0.0.2"
+NAS_HOME_MOUNT="/opt/hami-lc-home"
+AMD_PLUGIN_HOST_PATH="/opt/hami-lc/amd-time-slice"
+AMD_PLUGIN_CONTAINER_PATH="/opt/amd-time-slice"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
@@ -39,10 +40,11 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 ###############################################################################
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --server)  SERVER_IP="$2"; shift 2 ;;
-    --token)   TOKEN="$2"; shift 2 ;;
-    --vendor)  VENDOR="$2"; shift 2 ;;
-    --force)   FORCE=1; shift ;;
+    --server)    SERVER_IP="$2"; shift 2 ;;
+    --token)     TOKEN="$2"; shift 2 ;;
+    --vendor)    VENDOR="$2"; shift 2 ;;
+    --force)     FORCE=1; shift ;;
+    --nas-mount) NAS_HOME_MOUNT="$2"; shift 2 ;;
     -h|--help) grep '^#' "$0" | sed 's/^#//;s/^ //'; exit 0 ;;
     *) log_error "unknown arg: $1"; exit 1 ;;
   esac
@@ -58,7 +60,8 @@ done
 log_info "Pre-flight checks"
 . /etc/os-release
 log_info "OS: $PRETTY_NAME (kernel $(uname -r))"
-if ! curl -sf --max-time 5 "https://${SERVER_IP}:6443/version" >/dev/null 2>&1; then
+# any HTTP answer (even 401) proves the server is reachable
+if ! curl -sk --max-time 5 "https://${SERVER_IP}:6443/healthz" >/dev/null 2>&1; then
   log_error "cannot reach k3s server ${SERVER_IP}:6443"
   exit 1
 fi
@@ -88,6 +91,7 @@ if systemctl is-active k3s >/dev/null 2>&1 || command -v k3s >/dev/null 2>&1; th
   systemctl stop k3s 2>/dev/null || true
   rm -rf /var/lib/rancher/k3s
   rm -f /usr/local/bin/k3s /usr/local/bin/kubectl /usr/local/bin/krictl
+  rm -f /etc/rancher/k3s/k3s.yaml
 fi
 
 ###############################################################################
@@ -134,10 +138,19 @@ done
 systemctl is-active k3s >/dev/null 2>&1 || { log_error "k3s agent failed to start"; journalctl -u k3s | tail -20; exit 1; }
 log_info "k3s agent running"
 
+log_info "rewriting agent kubeconfig server to ${SERVER_IP}"
+if [[ -f /etc/rancher/k3s/k3s.yaml ]]; then
+  sed -i "s|server: https://127.0.0.1:6443|server: https://${SERVER_IP}:6443|" /etc/rancher/k3s/k3s.yaml
+fi
+
 ###############################################################################
 # 4. GPU stack
 ###############################################################################
-KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl label node "$(hostname)" --overwrite gpu=on gpu-vendor="${VENDOR}"
+if [[ "$VENDOR" == "amd" ]]; then
+  KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl label node "$(hostname)" --overwrite gpu=on gpu-vendor=amd amd.com/gpu.present=true
+else
+  KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl label node "$(hostname)" --overwrite gpu=on gpu-vendor=nvidia
+fi
 
 if [[ "$VENDOR" == "nvidia" ]]; then
   log_info "nvidia stack: nvidia-container-toolkit + CDI + containerd runtime"
@@ -154,9 +167,14 @@ if [[ "$VENDOR" == "nvidia" ]]; then
   sleep 10
   log_info "nvidia stack done (HAMi daemonsets will pick up the gpu=on node automatically)"
 else
-  log_info "amd stack: ROCm k8s-device-plugin time-slicing (sliceCount=${SLICE_COUNT})"
+  log_info "amd stack: hami-learning-cloud time-slicing plugin (sliceCount=${SLICE_COUNT})"
   modprobe amdgpu || log_warn "amdgpu module not loaded"
-  kubectl apply -f - <<EOF
+  if [[ ! -x "${AMD_PLUGIN_HOST_PATH}/k8s-device-plugin" ]]; then
+    log_error "AMD time-slice binary not found at ${AMD_PLUGIN_HOST_PATH}/k8s-device-plugin"
+    log_error "Build it with deploy/amd/build-time-slice-plugin.sh and install it as root at ${AMD_PLUGIN_HOST_PATH}/k8s-device-plugin, then re-run join.sh"
+    exit 1
+  fi
+  KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -165,77 +183,115 @@ metadata:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: amd-device-plugin-params
+  name: amdgpu-device-plugin-config
   namespace: amd-gpu
 data:
-  config.json: |
-    {
-      "version": "v1",
-      "log_level": "info",
-      "devices": ["*"],
-      "assign_device": "filter",
-      "mount_extended_dev": false,
-      "kfd_device": "/dev/kfd",
-      "drm_device": "/dev/dri",
-      "run_pod_as_root": false,
-      "docker_shm_size": "0",
-      "sandbox_image": "",
-      "disable_cgroup_check": false,
-      "default_mounts": [],
-      "time_slicing": {
-        "we": {
-          "default": {
-            "count": ${SLICE_COUNT}
-          }
-        }
-      }
-    }
+  config.yaml: |
+    version: "1.0"
+    sharing:
+      timeSlicing:
+        enabled: true
+        sliceCount: ${SLICE_COUNT}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: amdgpu-device-plugin
   namespace: amd-gpu
+  labels:
+    app.kubernetes.io/name: amdgpu-device-plugin
+    app.kubernetes.io/component: device-plugin
 spec:
   selector:
     matchLabels:
-      app: amdgpu-device-plugin
+      app.kubernetes.io/name: amdgpu-device-plugin
   template:
     metadata:
       labels:
-        app: amdgpu-device-plugin
+        app.kubernetes.io/name: amdgpu-device-plugin
     spec:
-      hostNetwork: true
-      hostPID: true
+      priorityClassName: system-node-critical
       tolerations:
-      - operator: Exists
-      containers:
-      - name: device-plugin
-        image: ${AMD_PLUGIN_IMAGE}
-        securityContext:
-          privileged: true
-        volumeMounts:
-        - name: device-plugin
-          mountPath: /var/lib/kubelet/device-plugins
-        - name: config
-          mountPath: /etc/amd-device-plugin
-        - name: kfd
-          mountPath: /dev/kfd
-        - name: dri
-          mountPath: /dev/dri
+        - key: CriticalAddonsOnly
+          operator: Exists
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: amd.com/gpu.present
+                    operator: In
+                    values:
+                      - "true"
       volumes:
-      - name: device-plugin
-        hostPath:
-          path: /var/lib/kubelet/device-plugins
-      - name: config
-        configMap:
-          name: amd-device-plugin-params
-      - name: kfd
-        hostPath:
-          path: /dev/kfd
-      - name: dri
-        hostPath:
-          path: /dev/dri
+        - name: dev-kfd
+          hostPath:
+            path: /dev/kfd
+        - name: dev-dri
+          hostPath:
+            path: /dev/dri
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: Directory
+        - name: sys-amdgpu
+          hostPath:
+            path: /sys/class/drm
+            type: Directory
+        - name: sys-kfd
+          hostPath:
+            path: /sys/class/kfd
+            type: Directory
+        - name: config
+          configMap:
+            name: amdgpu-device-plugin-config
+        - name: time-slice-binary
+          hostPath:
+            path: ${AMD_PLUGIN_HOST_PATH}
+            type: Directory
+      containers:
+        - name: amdgpu-dp
+          image: docker.io/rocm/k8s-device-plugin:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - ${AMD_PLUGIN_CONTAINER_PATH}/k8s-device-plugin
+          env:
+            - name: CONFIG_FILE_PATH
+              value: /etc/amdgpu-dp/config.yaml
+            - name: AMD_TIME_SLICE_COUNT
+              value: "${SLICE_COUNT}"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: dev-kfd
+              mountPath: /dev/kfd
+            - name: dev-dri
+              mountPath: /dev/dri
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: sys-amdgpu
+              mountPath: /sys/class/drm
+              readOnly: true
+            - name: sys-kfd
+              mountPath: /sys/class/kfd
+              readOnly: true
+            - name: config
+              mountPath: /etc/amdgpu-dp
+              readOnly: true
+            - name: time-slice-binary
+              mountPath: ${AMD_PLUGIN_CONTAINER_PATH}
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
 EOF
   log_info "amd stack done"
 fi
@@ -243,6 +299,10 @@ fi
 ###############################################################################
 # 5. NAS home (NFS)
 ###############################################################################
+if [[ "$NAS_HOME_MOUNT" == "/home" ]]; then
+  log_warn "mounting NAS over /home can hide local user homes; use --nas-mount for a dedicated path unless intended"
+fi
+
 if ! grep -qs "$NAS_SERVER" /etc/fstab && ! mountpoint -q "$NAS_HOME_MOUNT"; then
   log_info "mounting NAS home ${NAS_SERVER}:${NAS_HOME_EXPORT} -> ${NAS_HOME_MOUNT}"
   apt-get install -y -qq nfs-common >/dev/null 2>&1 || true
