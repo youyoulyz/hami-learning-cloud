@@ -47,7 +47,7 @@ custom:
   # - dummy: Accept any username/password (for testing)
   # - github: GitHub App authentication
   # - multi: GitHub App + Local accounts
-  authMode: "auto-login"
+  authMode: "dummy"
 
   # GitHub organization name for team-based resource access
   # Required for github and multi auth modes.
@@ -225,49 +225,21 @@ custom:
   # Each accelerator uses Kubernetes node selectors such as
   # amd.com/gpu.product-name to target compatible nodes.
   accelerators:
-    phx:
-      displayName: "AMD Radeon™ 780M (Phoenix Point iGPU)"
-      description: "RDNA 3.0 (gfx1103) | Compute Units 12 | 4GB LPDDR5X"
+    nvidia:
+      displayName: "NVIDIA GPU (HAMi vGPU)"
+      description: "Hard VRAM/compute quota via nvidia.com/gpumem + gpucores"
       nodeSelector:
-        amd.com/gpu.product-name: "AMD_Radeon_780M_Graphics"
+        gpu-vendor: "nvidia"
+      env: {}
+      quotaRate: 2
+    amd:
+      displayName: "AMD GPU (time-slicing)"
+      description: "Shared 7900XTX via amd.com/gpu time slices"
+      nodeSelector:
+        gpu-vendor: "amd"
       env:
-        # Phoenix hw (gfx1100/1101/1102/1103) shares a single gfx110x ROCm
-        # build — we do not ship dedicated images for gfx1102/gfx1103 — so
-        # force every Phoenix GPU to report as gfx1100 at runtime so it
-        # accepts the shared kernels.
-        HSA_OVERRIDE_GFX_VERSION: "11.0.0"
+        HSA_ENABLE_SDMA: "0"
       quotaRate: 2
-    strix:
-      displayName: "AMD Radeon™ 890M (Strix Point iGPU)"
-      description: "RDNA 3.5 (gfx1150) | Compute Units 16 | 4GB LPDDR5X"
-      nodeSelector:
-        amd.com/gpu.product-name: "AMD_Radeon_890M_Graphics"
-      env: {}
-      quotaRate: 2
-    strix-halo:
-      displayName: "AMD Radeon™ 8060S (Strix Halo iGPU)"
-      description: "RDNA 3.5 (gfx1151) | Compute Units 40 | 64GB LPDDR5X"
-      nodeSelector:
-        amd.com/gpu.product-name: "AMD_Radeon_8060S_Graphics"
-      env: {}
-      quotaRate: 3
-    9070xt:
-      displayName: "AMD Radeon™ RX 9070 XT (Desktop GPU)"
-      description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 16GB GDDR6"
-      # ROCm labeller publishes the marketing name with spaces → '_', so the
-      # expected value on a real node is AMD_Radeon_RX_9070_XT. If your fleet
-      # uses the older AMD_Radeon_9070XT normalisation, change it here.
-      nodeSelector:
-        amd.com/gpu.product-name: "AMD_Radeon_RX_9070_XT"
-      env: {}
-      quotaRate: 4
-    r9700:
-      displayName: "AMD Radeon™ AI Pro R9700 (Workstation GPU)"
-      description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 32GB GDDR6"
-      nodeSelector:
-        amd.com/gpu.product-name: "AMD_Radeon_AI_PRO_R9700"
-      env: {}
-      quotaRate: 4
 
   # ============================================================================
   # Course Resources Configuration
@@ -276,57 +248,27 @@ custom:
     # Course Images
     # Add new course images here
     images:
-      cpu: "ghcr.io/amdresearch/auplc-default:latest"
-      gpu: "ghcr.io/amdresearch/auplc-base:latest"
-      code-cpu: "ghcr.io/amdresearch/auplc-code-cpu:latest"
-      code-gpu: "ghcr.io/amdresearch/auplc-code-gpu:latest"
-      Course-CV: "ghcr.io/amdresearch/auplc-cv:latest"
-      Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
-      Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"
-      Course-PhySim: "ghcr.io/amdresearch/auplc-physim:latest"
-      # Custom-URL: "ghcr.io/amdresearch/auplc-cv:latest"
+      cpu: "quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6"
+      gpu: "quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6"
 
     # Optional spawn/Home group display order. Groups not listed here are shown
     # after these entries using the default alphabetical order.
     # Example: move DEVELOPMENT before COURSE by listing DEVELOPMENT first.
     groupOrder:
-      - TEACHING LABS
-      - DEVELOPMENT ENVIRONMENTS
-      - TUTORIALS
-      - CUSTOM REPOS
+      - CPU
+      - GPU
 
     # Course Resource Requirements
     # Define resource quotas for each course
     requirements:
       cpu:
-        cpu: "0"
-        memory: "0Gi"
-      code-cpu:
-        cpu: "0"
-        memory: "0Gi"
+        cpu: "2"
+        memory: "4Gi"
+        memory_limit: "6Gi"
       gpu:
-        cpu: "0"
-        memory: "0Gi"
-        amd.com/gpu: "1"
-      code-gpu:
-        cpu: "0"
-        memory: "0Gi"
-        amd.com/gpu: "1"
-      Course-CV:
-        cpu: "0"
-        memory: "0Gi"
-        amd.com/gpu: "1"
-      Course-DL:
-        cpu: "0"
-        memory: "0Gi"
-        amd.com/gpu: "1"
-      Course-LLM:
-        cpu: "0"
-        memory: "0Gi"
-        amd.com/gpu: "1"
-      Course-PhySim:
-        cpu: "0"
-        memory: "0Gi"
+        cpu: "4"
+        memory: "16Gi"
+        memory_limit: "16Gi"
         amd.com/gpu: "1"
       none:
         cpu: "0"
@@ -340,86 +282,31 @@ custom:
     # image/application default normally follows the image WORKDIR.
     metadata:
       cpu:
-        group: "CUSTOM REPOS"
-        description: "Basic Python Environment"
-        subDescription: "CPU Only Environment"
+        group: "CPU"
+        description: "CPU Notebook"
+        subDescription: "PyTorch notebook without GPU"
         accelerator: ""
         acceleratorKeys: []
         allowGitClone: true
         defaultPath: "/home/jovyan"
         resourceType: "notebook"
-      code-cpu:
-        group: "DEVELOPMENT ENVIRONMENTS"
-        description: "VSCode Server CPU"
-        subDescription: "CPU-only development workspace"
-        accelerator: ""
-        acceleratorKeys: []
-        allowGitClone: true
-        launchMode: "code-server"
-        defaultPath: "/home/jovyan"
-        resourceType: "browser-ide"
       gpu:
-        group: "CUSTOM REPOS"
-        description: "Basic GPU Environment"
-        subDescription: "GPU Accelerated Environment"
+        group: "GPU"
+        description: "GPU Notebook"
+        subDescription: "Choose NVIDIA (HAMi vGPU) or AMD (time-slicing)"
         accelerator: "GPU"
         acceleratorKeys:
-          - strix-halo
+          - nvidia
+          - amd
         allowGitClone: true
         defaultPath: "/home/jovyan"
         resourceType: "notebook"
-      code-gpu:
-        group: "DEVELOPMENT ENVIRONMENTS"
-        description: "VSCode Server GPU"
-        subDescription: "GPU-accelerated development workspace"
-        accelerator: "GPU"
-        acceleratorKeys:
-          - strix-halo
-        allowGitClone: true
-        launchMode: "code-server"
-        defaultPath: "/home/jovyan"
-        resourceType: "browser-ide"
-      Course-CV:
-        group: "TEACHING LABS"
-        description: "Computer Vision Course"
-        subDescription: "Suitable for CV experiments with GPU"
-        accelerator: "GPU"
-        acceleratorKeys:
-          - strix-halo
-        # acceleratorOverrides: (optional) per-accelerator image and env overrides
-        #   9070xt:
-        #     image: "ghcr.io/your-org/auplc-cv:<tag-for-9070xt>"
-        #   r9700:
-        #     image: "ghcr.io/your-org/auplc-cv:<tag-for-r9700>"
-        defaultPath: "/opt/workspace/CV"
-        resourceType: "notebook"
-      Course-DL:
-        group: "TEACHING LABS"
-        description: "Deep Learning Course"
-        subDescription: "Suitable for DL experiments with GPU"
-        accelerator: "GPU"
-        acceleratorKeys:
-          - strix-halo
-        defaultPath: "/opt/workspace/DL"
-        resourceType: "notebook"
-      Course-LLM:
-        group: "TEACHING LABS"
-        description: "Large Language Models Course"
-        subDescription: "Suitable for LLM experiments with GPU"
-        accelerator: "GPU"
-        acceleratorKeys:
-          - strix-halo
-        defaultPath: "/opt/workspace/LLM"
-        resourceType: "notebook"
-      Course-PhySim:
-        group: "TEACHING LABS"
-        description: "Genesis Physical Simulation Course"
-        subDescription: "Suitable for physical simulation experiments with GPU"
-        accelerator: "GPU"
-        acceleratorKeys:
-          - strix-halo
-        defaultPath: "/opt/workspace/PhySim"
-        resourceType: "notebook"
+        acceleratorOverrides:
+          amd:
+            image: "docker.io/library/hami-lc-amd:v1"
+            env:
+              HSA_ENABLE_SDMA: "0"
+              HIP_VISIBLE_DEVICES: "0"
 
   # ============================================================================
   # Team Permission Configuration
@@ -429,45 +316,17 @@ custom:
     mapping:
       cpu:
         - cpu
-        - code-cpu
       gpu:
-        - code-gpu
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-        - Course-PhySim
+        - gpu
       official:
         - cpu
         - gpu
-        - code-cpu
-        - code-gpu
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-        - Course-PhySim
-      AUP:
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-        - Course-PhySim
       native-users:
-        - code-cpu
-        - code-gpu
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-        - Course-PhySim
         - cpu
         - gpu
       github-users:
         - cpu
         - gpu
-        - code-cpu
-        - code-gpu
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-        - Course-PhySim
 
   # ============================================================================
   # Quota Management
@@ -486,13 +345,15 @@ custom:
 
 # Use K3s built-in local-path storage (no NFS required)
 hub:
+  nodeSelector:
+    kubernetes.io/hostname: hub-node
   db:
     pvc:
       storageClassName: local-path
   image:
-    name: ghcr.io/amdresearch/auplc-hub
-    tag: latest
-    pullPolicy: IfNotPresent
+    name: docker.io/library/hami-lc-hub
+    tag: v1
+    pullPolicy: Never
 
   # Optional Jinja template variables for Hub-rendered pages.
   # Example:
@@ -581,6 +442,8 @@ monitoring:
     enabled: false
 
 singleuser:
+  startTimeout: 900
+  cmd: jupyterhub-singleuser --allow-root
   # Security context for user pods to access GPU devices
   # supplementalGroups grants container access to host's render group (GID 993)
   # This allows non-root users to access /dev/kfd and /dev/dri devices
@@ -591,8 +454,11 @@ singleuser:
         - 993 # render group for ROCm GPU access
 
   storage:
-    dynamic:
-      storageClass: local-path
+    type: static
+    homeMountPath: /home/jovyan
+    static:
+      pvcName: hami-lc-user-home
+      subPath: "{username}"
 
 # Use NodePort for direct access
 proxy:
@@ -600,6 +466,12 @@ proxy:
     type: NodePort
     nodePorts:
       http: 30890
+
+# Disable the AUP busy-node user scheduler; NV pods use hami-scheduler and
+# AMD/CPU pods can use the default scheduler for the MVP.
+scheduling:
+  userScheduler:
+    enabled: false
 
 # Disable ingress (use NodePort instead)
 ingress:

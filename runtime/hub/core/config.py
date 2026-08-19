@@ -70,6 +70,9 @@ class AcceleratorConfig(BaseModel):
     nodeSelector: dict[str, str] = Field(default_factory=dict)
     env: dict[str, str] = Field(default_factory=dict)
     quotaRate: int = 1
+    vendor: str = ""
+    scheduler_name: str = ""
+    runtime_class_name: str = ""
 
     model_config = {"extra": "allow"}
 

@@ -745,6 +745,33 @@ class RemoteLabKubeSpawner(KubeSpawner):
         """Return whether the resource should launch code-server directly."""
         return self._get_launch_mode(resource_type) == CODE_SERVER_LAUNCH_MODE
 
+    def _accelerator_vendor(self, gpu_selection: str | None) -> str:
+        """Resolve the accelerator vendor for a selected accelerator key."""
+        if not gpu_selection:
+            return "cpu"
+        accelerator = self.accelerator_options.get(gpu_selection, {})
+        vendor = str(accelerator.get("vendor") or "").lower()
+        if vendor:
+            return vendor
+        key = gpu_selection.lower()
+        if "nvidia" in key:
+            return "nvidia"
+        if "amd" in key:
+            return "amd"
+        return "unknown"
+
+    def _accelerator_scheduler(self, gpu_selection: str | None) -> str:
+        if not gpu_selection:
+            return ""
+        accelerator = self.accelerator_options.get(gpu_selection, {})
+        return str(accelerator.get("scheduler_name") or "")
+
+    def _accelerator_runtime_class(self, gpu_selection: str | None) -> str:
+        if not gpu_selection:
+            return ""
+        accelerator = self.accelerator_options.get(gpu_selection, {})
+        return str(accelerator.get("runtime_class_name") or "")
+
     def _reset_per_spawn_state(self) -> None:
         """Clear fields that are derived from the selected resource each spawn."""
         if not hasattr(self, "_resource_baseline_state"):
@@ -758,6 +785,9 @@ class RemoteLabKubeSpawner(KubeSpawner):
                 "init_containers": copy.deepcopy(self.init_containers),
                 "extra_container_config": copy.deepcopy(self.extra_container_config),
                 "environment": copy.deepcopy(self.environment),
+                "extra_labels": copy.deepcopy(getattr(self, "extra_labels", None)),
+                "runtime_class_name": copy.deepcopy(getattr(self, "runtime_class_name", None)),
+                "scheduler_name": copy.deepcopy(getattr(self, "scheduler_name", None)),
             }
 
         for key, value in self._resource_baseline_state.items():
@@ -769,6 +799,10 @@ class RemoteLabKubeSpawner(KubeSpawner):
         """Configure the spawner based on the resource type and GPU selection."""
 
         self._reset_per_spawn_state()
+
+        # The HAMi mutating webhook is only needed for NVIDIA/HAMi pods. AMD and
+        # CPU pods should keep their explicit/default scheduler and skip mutation.
+        self.extra_labels = {**(self.extra_labels or {}), "hami.io/webhook": "ignore"}
 
         # Set basic configuration
         self.image = self.resource_images[resource_type]
@@ -826,9 +860,27 @@ class RemoteLabKubeSpawner(KubeSpawner):
                     self.mem_limit = memory_str
 
         # GPU/NPU resources
-        if "amd.com/gpu" in requirements:
-            self.extra_resource_guarantees = {"amd.com/gpu": str(requirements["amd.com/gpu"])}
-            self.extra_resource_limits = {"amd.com/gpu": str(requirements["amd.com/gpu"])}
+        if "amd.com/gpu" in requirements or "nvidia.com/gpu" in requirements:
+            vendor = self._accelerator_vendor(gpu_selection)
+            if vendor == "nvidia":
+                gpu_resources = {
+                    "nvidia.com/gpu": str(requirements.get("nvidia.com/gpu", "1")),
+                    "nvidia.com/gpumem": str(requirements.get("nvidia.com/gpumem", "4000")),
+                    "nvidia.com/gpucores": str(requirements.get("nvidia.com/gpucores", "25")),
+                }
+                self.extra_resource_guarantees = dict(gpu_resources)
+                self.extra_resource_limits = dict(gpu_resources)
+                self.runtime_class_name = self._accelerator_runtime_class(gpu_selection) or "nvidia"
+                self.scheduler_name = self._accelerator_scheduler(gpu_selection) or "hami-scheduler"
+                self.extra_labels = {k: v for k, v in (self.extra_labels or {}).items() if k != "hami.io/webhook"}
+                self.log.info(f"Configured NVIDIA/HAMi vGPU resources for {resource_type}/{gpu_selection}: {gpu_resources}")
+            else:
+                amd_gpu = str(requirements.get("amd.com/gpu", "1"))
+                self.extra_resource_guarantees = {"amd.com/gpu": amd_gpu}
+                self.extra_resource_limits = {"amd.com/gpu": amd_gpu}
+                self.runtime_class_name = self._accelerator_runtime_class(gpu_selection)
+                self.scheduler_name = self._accelerator_scheduler(gpu_selection) or "default-scheduler"
+                self.log.info(f"Configured AMD time-slicing GPU resource for {resource_type}/{gpu_selection}: {amd_gpu}")
         elif "amd.com/npu" in requirements:
             self.log.debug("NPU DEVICE PLUGIN are removed, amd.com/npu is no more needed")
 
