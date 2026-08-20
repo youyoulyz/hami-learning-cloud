@@ -250,6 +250,8 @@ custom:
     images:
       cpu: "quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6"
       gpu: "quay.io/jupyter/pytorch-notebook:cuda13-notebook-7.5.6"
+      code-cpu: "docker.io/library/hami-lc-code-cpu:v1"
+      code-gpu: "docker.io/library/hami-lc-code-gpu:v1"
 
     # Optional spawn/Home group display order. Groups not listed here are shown
     # after these entries using the default alphabetical order.
@@ -257,6 +259,7 @@ custom:
     groupOrder:
       - CPU
       - GPU
+      - DEVELOPMENT
 
     # Course Resource Requirements
     # Define resource quotas for each course
@@ -266,6 +269,15 @@ custom:
         memory: "4Gi"
         memory_limit: "6Gi"
       gpu:
+        cpu: "4"
+        memory: "16Gi"
+        memory_limit: "16Gi"
+        amd.com/gpu: "1"
+      code-cpu:
+        cpu: "2"
+        memory: "4Gi"
+        memory_limit: "6Gi"
+      code-gpu:
         cpu: "4"
         memory: "16Gi"
         memory_limit: "16Gi"
@@ -307,6 +319,27 @@ custom:
             env:
               HSA_ENABLE_SDMA: "0"
               HIP_VISIBLE_DEVICES: "0"
+      code-cpu:
+        group: "DEVELOPMENT"
+        description: "VS Code Server (CPU)"
+        subDescription: "Browser-based code-server without GPU"
+        accelerator: ""
+        acceleratorKeys: []
+        allowGitClone: true
+        defaultPath: "/home/jovyan"
+        resourceType: "browser-ide"
+        launchMode: "code-server"
+      code-gpu:
+        group: "DEVELOPMENT"
+        description: "VS Code Server (GPU)"
+        subDescription: "Browser-based code-server with NVIDIA (HAMi vGPU); AMD variant pending"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - nvidia
+        allowGitClone: true
+        defaultPath: "/home/jovyan"
+        resourceType: "browser-ide"
+        launchMode: "code-server"
 
   # ============================================================================
   # Team Permission Configuration
@@ -316,17 +349,25 @@ custom:
     mapping:
       cpu:
         - cpu
+        - code-cpu
       gpu:
         - gpu
+        - code-gpu
       official:
         - cpu
         - gpu
+        - code-cpu
+        - code-gpu
       native-users:
         - cpu
         - gpu
+        - code-cpu
+        - code-gpu
       github-users:
         - cpu
         - gpu
+        - code-cpu
+        - code-gpu
 
   # ============================================================================
   # Quota Management
