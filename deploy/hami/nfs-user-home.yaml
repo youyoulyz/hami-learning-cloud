@@ -12,7 +12,9 @@ spec:
   mountOptions:
     - nfsvers=4
   nfs:
-    server: nas-server
+    # Local values come from .env.local (rendered by scripts/render_local.sh
+    # into build/nfs-user-home.yaml); do not commit real values.
+    server: ${NAS_SERVER}
     path: ${NAS_HOME_EXPORT}
 ---
 apiVersion: v1

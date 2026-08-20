@@ -6,7 +6,9 @@ metadata:
     app: amd-time-slice-test
 spec:
   nodeSelector:
-    kubernetes.io/hostname: amd-gpu-node
+    # Rendered from AMD_GPU_NODE_HOSTNAME in .env.local (scripts/render_local.sh);
+    # do not commit node names.
+    kubernetes.io/hostname: ${AMD_GPU_NODE_HOSTNAME}
   hostIPC: true
   restartPolicy: Never
   containers:
@@ -47,7 +49,9 @@ metadata:
     app: amd-time-slice-test
 spec:
   nodeSelector:
-    kubernetes.io/hostname: amd-gpu-node
+    # Rendered from AMD_GPU_NODE_HOSTNAME in .env.local (scripts/render_local.sh);
+    # do not commit node names.
+    kubernetes.io/hostname: ${AMD_GPU_NODE_HOSTNAME}
   hostIPC: true
   restartPolicy: Never
   containers:
@@ -88,7 +92,9 @@ metadata:
     app: amd-time-slice-test
 spec:
   nodeSelector:
-    kubernetes.io/hostname: amd-gpu-node
+    # Rendered from AMD_GPU_NODE_HOSTNAME in .env.local (scripts/render_local.sh);
+    # do not commit node names.
+    kubernetes.io/hostname: ${AMD_GPU_NODE_HOSTNAME}
   hostIPC: true
   restartPolicy: Never
   containers:

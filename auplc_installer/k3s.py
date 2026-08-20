@@ -33,7 +33,9 @@ K9S_LINUX_AMD64_DEB_SHA256 = "3f12b34557d9ed9eada465b6fad57dbe9367786f68cfd4604a
 
 K3S_IMAGES_DIR = "/var/lib/rancher/k3s/agent/images"
 K3S_REGISTRIES_FILE = "/etc/rancher/k3s/registries.yaml"
-K3S_NODE_IP = "10.0.0.1"
+# Stable private IP for the k3s dummy0 node interface. Must be set per
+# deployment (a /32 on dummy0, unused by the LAN); never commit a real value.
+K3S_NODE_IP = os.environ.get("AUPLC_K3S_NODE_IP", "")
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +141,11 @@ def _dummy_interface_exists() -> bool:
 
 
 def setup_dummy_interface() -> None:
+    if not K3S_NODE_IP:
+        raise InstallerError(
+            "AUPLC_K3S_NODE_IP is not set; export a stable private IP for the "
+            "k3s dummy0 node interface (e.g. export AUPLC_K3S_NODE_IP=10.0.0.1)"
+        )
     if _dummy_interface_exists():
         log("Dummy interface already exists, skipping setup")
         return

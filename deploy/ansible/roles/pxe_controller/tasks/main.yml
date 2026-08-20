@@ -56,7 +56,7 @@
       - "'<' not in (pxe_subnet | string)"
     fail_msg: >-
       pxe_subnet is not set. Set it to your node subnet in CIDR form
-      (for example 192.168.X.0/24) in the playbook vars (no value ships in the repo).
+      (for example 10.20.0.0/16) in the playbook vars (no value ships in the repo).
 
 - name: Assert PXE DNS servers are set
   ansible.builtin.assert:

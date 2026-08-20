@@ -2,7 +2,7 @@
 
 > 交接对象：**2070 + 5060Ti 机器上的 agent**
 > 交接人：3080 侧的 opencode agent ｜ 日期：2026-08-19
-> 前提：`/mnt/<HOST>` 是 NAS NFS 共享家目录，你在本机挂载后即可看到本目录所有文件。
+> 前提：`<NAS 挂载点>` 是 NAS NFS 共享家目录，你在本机挂载后即可看到本目录所有文件。
 
 ## 0. 30 秒版
 
@@ -16,8 +16,8 @@
 - 计划 **v1.0 已定稿**（Q1/Q2/Q3 已批：项目名 hami-learning-cloud / 无硬期限 / 最小镜像清单），**尚未开始写代码**
 - 用户已确认的事实：7900XTX 跑 torch 没问题（用户自己训过小模型）
 - 5 月份在 3080 机器上已验证过：K3s + Z2JH + HAMi v2.9.0 单卡 4 路（4G 显存/25% 算力）共享跑通，
-  资产在 `/mnt/<HOST>/hpc/gpu-sharing/nv-hami/`（install-z2jh.sh / train.py / train-pods.yaml / z2jh-values.yaml）
-- `/tmp/opencode/aup-latest` 是 AUP 上游最新克隆（main @ 27f4190），**在 tmp 里会丢，你需要时重新 clone**：
+  资产在 `<gpu-sharing 根目录>/nv-hami/`（install-z2jh.sh / train.py / train-pods.yaml / z2jh-values.yaml）
+- `<本地 AUP 克隆目录>` 是 AUP 上游最新克隆（main @ 27f4190），**临时克隆会丢，你需要时重新 clone**：
   `git clone --depth 50 https://github.com/AMDResearch/aup-learning-cloud`
   参考要点：`runtime/hub/core/spawner/kubernetes.py`（`_configure_spawner`，1230 行，NV 移植唯一的大改动点）、
   `runtime/hub/core/quota/manager.py`（配额，原样移植）、`runtime/values.yaml`（accelerators/resources/quota 配置模型）、
@@ -36,7 +36,7 @@
 机器要点：
 - 本机 5060Ti 是 Blackwell：需要 **570+/580 系 NVIDIA 驱动 + CUDA 12.8/13** 镜像；2070S（Turing, sm_75）共用同一驱动。装驱动时锁版本，写进安装脚本
 - 7900XTX：ROCm + amdgpu 内核模块，消费级 RDNA3（gfx1101），time-slicing 共享（无显存隔离，slice 数保守取 3）
-- 用户目录放 NAS（`nas-server`，NFS，192.168.X.2），集群 RWX
+- 用户目录放 NAS（NFS，地址本地配置，勿写入仓库），集群 RWX
 - 外网入口：cloudflared tunnel（P5），AUP 的 `publicScheme=https + allowedOrigins` 机制现成
 
 ## 3. 你现在就可以做（不等审批）
@@ -91,7 +91,7 @@
 | `.../hami-learning-cloud/PLAN.md` | 计划（唯一事实来源，v1.0 已定稿） |
 | `.../hami-learning-cloud/HANDOVER.md` | 本文件 |
 | `.../hami-learning-cloud/images/Dockerfile.amd` | AMD (7900XTX) 课程镜像 Dockerfile（已定稿，P3 构建） |
-| `/mnt/<HOST>/CS290W/aup-learning-cloud` | AUP 本地快照（用户 fork，5 月版 @ PR#93；含用户自己的课程 commit，**只读**） |
+| `<本地 AUP 快照目录>` | AUP 本地快照（用户 fork，5 月版 @ PR#93；含用户自己的课程 commit，**只读**） |
 | AUP 上游最新 | 需重新 clone（§1）；比本地快照新 ~75 个 PR（Python installer、PXE、code-server、quota 修复等） |
 | `.../nv-hami/HAMi` | HAMi v2.9.0 源码 + `charts/hami` + `skill/`（调试参考：hami-vgpu-metrics-summary 等） |
 | `.../nv-hami/HAMi-WebUI` | 可选监控前端（stretch 才用） |
@@ -99,4 +99,4 @@
 | `.../amd-hami/manifests/amd-device-plugin.yaml` | N3 要用的 AMD time-slicing manifest（**sliceCount 从 6 改 3**） |
 | `.../amd-hami/setup-k3s.sh` | AMD 侧 K3s 参考（5 月写的） |
 
-（`...` = `/mnt/<HOST>/hpc/gpu-sharing`）
+（`...` = `<gpu-sharing 根目录>`）

@@ -59,6 +59,6 @@
 
 ## 当前入口
 
-- 局域网 Hub：`http://192.168.X.1:30890`
-- Grafana：`http://192.168.X.1:30300`（账号 `admin` / `admin`，演示环境默认值，正式使用前请改密）
+- 局域网 Hub：`http://<LAN_HUB_HOST>:30890`
+- Grafana：`http://<LAN_HUB_HOST>:30300`（账号 `admin` / `admin`，演示环境默认值，正式使用前请改密）
 - 公网 tunnel：临时 quick tunnel，URL 在 `/tmp/cloudflared.log` 中，重启后会变化。

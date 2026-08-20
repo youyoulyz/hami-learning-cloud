@@ -15,7 +15,9 @@ spec:
     - hard
     - timeo=600
   nfs:
-    server: nas-server
+    # Local values come from .env.local (rendered by scripts/render_local.sh
+    # into build/nfs-home.yaml); do not commit real values.
+    server: ${NAS_SERVER}
     path: ${NAS_HOME_EXPORT}
 ---
 apiVersion: v1

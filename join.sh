@@ -2,7 +2,13 @@
 # hami-learning-cloud: one-command GPU node join.
 #
 # Usage (on the joining node):
-#   sudo ./join.sh --server 192.168.X.1 --token <K3S_TOKEN> [--vendor nvidia|amd] [--force] [--nas-mount /opt/hami-lc-home]
+#   sudo ./join.sh --server <K3S_SERVER_IP> --token <K3S_TOKEN> [--vendor nvidia|amd] [--force] [--nas-mount /opt/hami-lc-home]
+#
+# Local values live in .env.local (gitignored; copy it to the joining node too):
+#   set -a; . ./.env.local; set +a
+#   sudo -E ./join.sh --server "$K3S_SERVER_IP" --token "$K3S_TOKEN" [--vendor nvidia|amd]
+# NAS home mount is driven by NAS_SERVER + NAS_HOME_EXPORT from that env file;
+# if NAS_SERVER is unset the NAS step is skipped.
 #
 # K3S_TOKEN on the master (N1):  sudo cat /var/lib/rancher/k3s/server/token
 #
@@ -24,8 +30,8 @@ TOKEN=""
 VENDOR=""
 FORCE=0
 SLICE_COUNT="${SLICE_COUNT:-3}"
-NAS_SERVER="nas-server"
-NAS_HOME_EXPORT="${NAS_HOME_EXPORT}"
+NAS_SERVER="${NAS_SERVER:-}"
+NAS_HOME_EXPORT="${NAS_HOME_EXPORT:-/hami-lc-home}"
 NAS_HOME_MOUNT="/opt/hami-lc-home"
 AMD_PLUGIN_HOST_PATH="/opt/hami-lc/amd-time-slice"
 AMD_PLUGIN_CONTAINER_PATH="/opt/amd-time-slice"
@@ -306,7 +312,9 @@ if [[ "$NAS_HOME_MOUNT" == "/home" ]]; then
   log_warn "mounting NAS over /home can hide local user homes; use --nas-mount for a dedicated path unless intended"
 fi
 
-if ! grep -qs "$NAS_SERVER" /etc/fstab && ! mountpoint -q "$NAS_HOME_MOUNT"; then
+if [[ -z "$NAS_SERVER" ]]; then
+  log_info "NAS_SERVER not set; skipping NAS home mount"
+elif ! grep -qs "$NAS_SERVER" /etc/fstab && ! mountpoint -q "$NAS_HOME_MOUNT"; then
   log_info "mounting NAS home ${NAS_SERVER}:${NAS_HOME_EXPORT} -> ${NAS_HOME_MOUNT}"
   apt-get install -y -qq nfs-common >/dev/null 2>&1 || true
   mkdir -p "$NAS_HOME_MOUNT"

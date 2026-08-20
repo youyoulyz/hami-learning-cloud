@@ -28,7 +28,7 @@
     # Network -- REQUIRED: fill in for your environment. Left empty on purpose;
     # the role asserts each of these is set and fails fast if any is empty.
     # pxe_network_interface: service-machine NIC that serves PXE (e.g. "enp1s0")
-    # pxe_subnet:            node subnet in CIDR form (e.g. "192.168.X.0/24")
+    # pxe_subnet:            node subnet in CIDR form (e.g. "10.20.0.0/16")
     # pxe_gateway:           default gateway for the node subnet (informational)
     # pxe_dns_servers:       comma-separated DNS servers for the rootfs
     pxe_network_interface: ""

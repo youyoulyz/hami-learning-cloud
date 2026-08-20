@@ -2,7 +2,7 @@
 """Manage hami-learning-cloud user quotas through the Hub admin API.
 
 Environment:
-  JUPYTERHUB_URL   Hub base URL, e.g. http://192.168.X.1:30890
+  JUPYTERHUB_URL   Hub base URL, e.g. http://<hub-host>:30890
   JUPYTERHUB_TOKEN Admin API token
 
 Examples:

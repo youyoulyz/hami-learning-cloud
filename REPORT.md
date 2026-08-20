@@ -18,9 +18,9 @@ AUP Learning Cloud 是面向 AMD 消费级 GPU 的教学云：它有完整的 UI
 | N3 | RX 7900 XTX 24G | AMD GPU 节点 | ROCm time-slicing ×3 |
 | N2 | 2× RTX 3080 20G | 未加入 | 因推理负载占用，按铁律不动 |
 
-集群入口：
-- JupyterHub：`http://192.168.X.1:30890`
-- Grafana：`http://192.168.X.1:30300`
+集群入口（内网地址按部署环境替换，勿提交真实值）：
+- JupyterHub：`http://<LAN_HUB_HOST>:30890`
+- Grafana：`http://<LAN_HUB_HOST>:30300`
 - 公网：cloudflared quick tunnel（临时 URL）
 
 ## 核心架构

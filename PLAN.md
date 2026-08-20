@@ -64,10 +64,10 @@
    ├─ HAMi device-plugin + vGPUmonitor         └─ ROCm k8s-device-plugin (time-slicing ×3)
    ├─ label: gpu-vendor=nvidia                 └─ label: gpu-vendor=amd
    └─ ⚠️ 当前 VRAM 被推理占用，恢复后加入       └─ 空闲，首批加入
-                          ┌──────────────────────────────┐
-                          │  TrueNAS NAS (NFS, 192.168.X.2) │
-                          │  <NAS_SHARE>/.../home/<user> │
-                          └──────────────────────────────┘
+                           ┌──────────────────────────────┐
+                           │  NAS (NFS RWX, 地址本地配置) │
+                           │  <NAS_SHARE>/home/<user>     │
+                           └──────────────────────────────┘
 
  调度: NV pod → schedulerName=hami-scheduler (vGPU fit/score, 跨节点 binpack/spread)
        AMD pod → schedulerName=default (amd.com/gpu 为普通 extended resource)
