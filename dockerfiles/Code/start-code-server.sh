@@ -103,7 +103,6 @@ case "${service_prefix}" in
 esac
 
 nginx_prefix="$(url_decode "${service_prefix}")"
-regex_prefix="$(printf '%s' "${nginx_prefix}" | sed "s/[.[\\*^\$()+?{}|]/\\\\&/g")"
 nginx_conf="/tmp/auplc-code-server-nginx.conf"
 redirect_block=""
 
@@ -148,8 +147,10 @@ http {
 ${redirect_block}
 
     location ${nginx_prefix} {
-      rewrite ^${regex_prefix}(.*)\$ /\$1 break;
-      proxy_pass http://127.0.0.1:${code_server_port};
+      # Trailing slash on proxy_pass replaces the location prefix with "/":
+      # /user/<name>/x -> /x. (A rewrite+break here mangles long URIs on the
+      # Ubuntu nginx 1.24 build observed in production.)
+      proxy_pass http://127.0.0.1:${code_server_port}/;
       proxy_http_version 1.1;
       proxy_set_header Host \$http_host;
       proxy_set_header X-Forwarded-Host \$http_host;
