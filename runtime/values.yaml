@@ -386,8 +386,10 @@ custom:
 
 # Use K3s built-in local-path storage (no NFS required)
 hub:
-  nodeSelector:
-    kubernetes.io/hostname: hub-node
+  nodeSelector: {}
+  # Pin the Hub to a specific node: set HUB_NODE_HOSTNAME in .env.local and run
+  # ./scripts/render_local.sh — it writes the gitignored runtime/values.local.yaml
+  # overlay that both helm paths pick up. Do not commit node hostnames.
   db:
     pvc:
       storageClassName: local-path
