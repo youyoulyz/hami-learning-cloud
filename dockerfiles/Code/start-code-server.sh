@@ -29,6 +29,20 @@ url_decode() {
 seed_builtin_extensions() {
   mkdir -p "${extensions_dir}"
 
+  # Users with a persistent extension set keep it untouched.
+  if [ -n "$(ls -A "${extensions_dir}" 2>/dev/null)" ]; then
+    return 0
+  fi
+
+  # First launch: prefer the image-baked extension set (installed at build
+  # time) so startup needs no network access and stays well under the
+  # Hub's http_timeout.
+  if [ -d "/opt/auplc/code-server/extensions" ] && [ -n "$(ls -A /opt/auplc/code-server/extensions 2>/dev/null)" ]; then
+    cp -a /opt/auplc/code-server/extensions/. "${extensions_dir}/"
+    return 0
+  fi
+
+  # Fallback: install from the marketplace list (slow, network-dependent).
   if [ -f "${extensions_list}" ]; then
     while IFS= read -r extension_id || [ -n "${extension_id}" ]; do
       case "${extension_id}" in
@@ -90,7 +104,11 @@ redirect_block=""
 
 seed_builtin_extensions
 trusted_domain_args=()
-build_trusted_domain_args "${trusted_domains}" trusted_domain_args
+# Only pass the link-protection flag when this code-server build supports it
+# (vanilla 4.96.x exits on unknown options).
+if [ -n "${trusted_domains}" ] && code-server --help 2>&1 | grep -q -- "--link-protection-trusted-domains"; then
+  build_trusted_domain_args "${trusted_domains}" trusted_domain_args
+fi
 
 if [ "${service_prefix}" != "/" ]; then
   redirect_block="
