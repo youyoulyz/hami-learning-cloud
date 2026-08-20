@@ -53,6 +53,15 @@ VRAM/compute hard quotas on mixed consumer NVIDIA + AMD hardware.
 ## Security Discipline
 
 - kubeconfigs, NAS passwords, tokens: **never commit, never paste into chat**.
+- No internal topology in the repo: never commit LAN IPs, node hostnames, NAS
+  server/paths, or host filesystem paths (e.g. `/mnt/...`). Committed files use
+  `${VAR}` placeholders; real values go in the gitignored `.env.local`
+  (template: `.env.local.example`) and are rendered by `scripts/render_local.sh`
+  into `runtime/values.local.yaml` + `build/*.yaml`.
+- The committed defaults are an intentional LOCAL-DEMO posture (dummy auth +
+  `allow_all`, no TLS / NodePort HTTP, Grafana `admin`/`admin`, notebook
+  containers with sudo). Do not silently "fix" them; README 安全姿态 section
+  lists what must change before any non-trusted exposure.
 - Never push to `AMDResearch/aup-learning-cloud` (upstream, read-only).
 - The 3080 machine (N2) may carry live inference load: never touch its GPUs/processes.
 
