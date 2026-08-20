@@ -47,7 +47,10 @@ def _helm_install_args(paths: RuntimePaths, *, dev: bool = False) -> list[str]:
     args = ["-f", str(paths.values_path)]
     if dev:
         args += ["-f", DEV_VALUES_PATH]
-    args += ["-f", str(paths.overlay_path)]
+    # Local-only overlay (gitignored): hub node pinning rendered by
+    # scripts/render_local.sh from .env.local. Optional; skip when absent.
+    if paths.overlay_path.exists():
+        args += ["-f", str(paths.overlay_path)]
     return args
 
 

@@ -18,4 +18,10 @@
 # SOFTWARE.
 
 
-helm upgrade jupyterhub runtime/chart -n jupyterhub --values runtime/values.yaml 
+VALUES_ARGS=(--values runtime/values.yaml)
+# Local-only overlay (gitignored): hub node pinning rendered by
+# scripts/render_local.sh from .env.local. Skipped when not present.
+if [[ -f runtime/values.local.yaml ]]; then
+  VALUES_ARGS+=(--values runtime/values.local.yaml)
+fi
+helm upgrade jupyterhub runtime/chart -n jupyterhub "${VALUES_ARGS[@]}"

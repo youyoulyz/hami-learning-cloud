@@ -76,11 +76,41 @@ git clone <this repo> && cd hami-learning-cloud
 
 ```bash
 # master 已在 N1；新节点一行加入（P1 交付 join.sh 后启用）
-./join.sh <node>
+set -a; . ./.env.local; set +a
+sudo -E ./join.sh --server "$K3S_SERVER_IP" --token "$K3S_TOKEN" [--vendor nvidia|amd]
 ```
 
-用户 home 持久化：TrueNAS NFS RWX（`<NAS_SHARE>/.../home/<user>`），pod 重建数据不丢。
+本地部署值（`.env.local`，gitignored，永不提交）：
+
+```bash
+cp .env.local.example .env.local   # 填 hub 节点主机名、NAS 地址、k3s server IP 等
+./scripts/render_local.sh          # 生成 runtime/values.local.yaml（helm overlay）+ build/*.yaml
+./scripts/helm_upgrade.bash        # 自动合并本地 overlay
+kubectl apply -f build/nfs-home.yaml
+```
+
+仓库内只保留 `${VAR}` 占位符；NAS 地址、节点主机名等真实值只存在于 `.env.local`
+与渲染产物（`runtime/values.local.yaml`、`build/`，均 gitignored）。
+
+用户 home 持久化：NFS RWX 静态 PV（`<NAS_SHARE>/home/<user>`，地址本地配置），pod 重建数据不丢。
 公网入口：cloudflared tunnel（`publicScheme=https` + allowedOrigins）。
+
+## 安全姿态（本地/内网部署默认，暴露公网前必读）
+
+仓库默认配置**只面向私有本地/局域网教学演示**，包含以下有意为之的放宽项。
+暴露到不可信网络前必须逐项处理：
+
+| # | 默认配置 | 位置 | 风险 | 公网化前必须做 |
+|---|---|---|---|---|
+| 1 | `authMode: "dummy"` + `allow_all: true` + `admin_users: [admin]` | `runtime/values.yaml`（`custom.authMode`、`Authenticator`） | 任意用户名/密码均可登录，且可直接登录为 `admin`（重置他人密码、改配额/组、读全部用量） | 切 `native`/`multi`/`github` 认证，`allow_all: false`，配置真实用户与 admin 列表 |
+| 2 | proxy 无 TLS，Hub 经 NodePort 30890 明文 HTTP 暴露 | `runtime/values.yaml`（`proxy`/`ingress`，chart 默认 `proxy.https.enabled: false`） | 凭据与会话明文传输，`_xsrf` 非 Secure，CSRF 防护弱化 | 启用 `proxy.https.enabled: true`，或外部 TLS 终结 + `publicScheme: "https"` |
+| 3 | `allowedOrigins: ["*"]`（hub + notebook） | `runtime/values.yaml`（`custom.hub`/`custom.notebook`） | 任意网站可跨域请求 Hub API / notebook kernel | 收敛为实际域名列表 |
+| 4 | Grafana 默认口令 `admin`/`admin`，NodePort 30300 | `deploy/monitoring/grafana.yaml` | 未改密即等于开放集群 GPU/用量面板 | 改密，或仅内网可达 |
+| 5 | notebook 容器 `--allow-root`，`jovyan` 有 NOPASSWD sudo，`/dev/kfd`、`/dev/dri` 全局可写 | `dockerfiles/Base/Dockerfile.rocm` | 用户 kernel 可获容器 root 并直接触碰 GPU 设备 | 仅面向可信学生使用；对外需限制设备挂载/sudo |
+| 6 | Hub 镜像 `pullPolicy: Never` + 本地 registry tag | `runtime/values.yaml`（`hub.image`） | 仅本机可部署，跨机部署需先同步镜像 | 按环境配置 registry |
+
+以上为本地教学场景的有意取舍（demo 易用性优先），**不要悄悄"修复"它们**；
+对外暴露时完成上表项并复测三条 spawn 路径（NV/AMD/CPU）与登录流。
 
 ## 目录
 
