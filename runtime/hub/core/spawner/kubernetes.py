@@ -1026,6 +1026,9 @@ class RemoteLabKubeSpawner(KubeSpawner):
         launches_code_server = self._launches_code_server(resource_type)
 
         if launches_code_server:
+            # code-server startup (extension seeding + nginx) is slower than
+            # JupyterLab; give the Hub's HTTP health wait more headroom.
+            self.http_timeout = 300
             hub_url = self._get_public_hub_home_url()
             self.environment["AUPLC_HUB_URL"] = hub_url
             trusted_domains = self._get_code_server_trusted_domains(hub_url)
