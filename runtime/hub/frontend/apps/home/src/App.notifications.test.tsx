@@ -158,7 +158,7 @@ describe("App homepage notifications", () => {
             format: "markdown",
             eyebrow: "Platform",
             titleHtml: "<p>Welcome to hami-learning-cloud</p>",
-            messageHtml: "<p>Get started with GPU-accelerated Jupyter notebooks powered by AMD ROCm technology.</p>",
+            messageHtml: "<p>Launch GPU notebooks with NVIDIA HAMi vGPU or AMD ROCm time slicing.</p>",
             link: null,
             startsAt: null,
             endsAt: null,

@@ -101,7 +101,7 @@ custom:
           severity: info
           eyebrow: "Platform"
           title: "Welcome to hami-learning-cloud"
-          message: "Get started with GPU-accelerated Jupyter notebooks powered by AMD ROCm technology."
+          message: "Launch GPU notebooks with NVIDIA HAMi vGPU or AMD ROCm time slicing."
           format: markdown
           startsAt: ""
           endsAt: ""

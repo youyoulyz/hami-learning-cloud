@@ -22,6 +22,7 @@ export interface ResourceRequirements {
   memory: string;
   memory_limit?: string;
   "amd.com/gpu"?: string;
+  "nvidia.com/gpu"?: string;
   "amd.com/npu"?: string;
 }
 

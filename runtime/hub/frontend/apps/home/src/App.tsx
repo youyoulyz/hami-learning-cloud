@@ -31,7 +31,6 @@ import {
 } from "@auplc/shared";
 import onboardingLaunchWorkspaceUrl from "./onboarding-launch-workspace.png";
 import onboardingResourcePickerUrl from "./onboarding-resource-picker.png";
-import onboardingDeveloperProgramQrUrl from "./onboarding-developer-program-qr.png";
 
 type Theme = "light" | "dark";
 function getInitialTheme(): Theme {
@@ -59,8 +58,6 @@ interface OnboardingState {
 }
 
 type OnboardingStep = 0 | 1 | 2;
-
-const DEVELOPER_PROGRAM_URL = "https://www.amd.com/en/developer/ai-dev-program.html?utm_source=Generic&utm_campaign=AUP&utm_id=AUP";
 
 declare global {
   interface Window {
@@ -147,12 +144,14 @@ function formatResourceSpecs(r: Resource): string {
   const memNum = parseFloat(req.memory);
   if (memNum > 0) parts.push(req.memory.replace("Gi", "GB"));
   if (req["amd.com/gpu"]) parts.push(`${req["amd.com/gpu"]} GPU`);
+  if (req["nvidia.com/gpu"]) parts.push(`${req["nvidia.com/gpu"]} GPU`);
   if (req["amd.com/npu"]) parts.push(`${req["amd.com/npu"]} NPU`);
   return parts.join(", ");
 }
 
 function getAcceleratorType(r: Resource): "gpu" | "npu" | "cpu" {
   if (r.requirements["amd.com/gpu"]) return "gpu";
+  if (r.requirements["nvidia.com/gpu"]) return "gpu";
   if (r.requirements["amd.com/npu"]) return "npu";
   return "cpu";
 }
@@ -432,7 +431,7 @@ function App() {
             <a href={`${baseUrl}spawn`}>
               <i className="fa fa-rocket"></i> Launch Server
             </a>
-            <button className="hero-nav-btn onboarding-reopen-btn" onClick={openOnboarding} type="button" title="Open quick guide" aria-label="Open AUP quick guide">
+            <button className="hero-nav-btn onboarding-reopen-btn" onClick={openOnboarding} type="button" title="Open quick guide" aria-label="Open quick guide">
               <i className="fa fa-question-circle"></i> Guide
             </button>
             <button className="hero-nav-btn" onClick={openUsage} type="button">
@@ -454,9 +453,8 @@ function App() {
             Welcome to <span className="accent">{platformName}</span>
           </h1>
           <p className="hero-desc">
-            Experience next-generation AI acceleration with AMD ROCm. Launch
-            GPU-powered Jupyter notebooks for deep learning, computer vision,
-            LLMs, and more.
+            Launch GPU-powered Jupyter notebooks with NVIDIA HAMi vGPU or AMD
+            ROCm time slicing for deep learning, computer vision, and LLM workloads.
           </p>
         </div>
       </section>
@@ -707,8 +705,25 @@ function App() {
                     <i className="fa fa-book"></i>
                   </div>
                   <div className="doc-text">
-                    <h4>AMD ROCm Documentation</h4>
-                    <p>Official ROCm platform docs &amp; API references</p>
+                    <h4>ROCm Documentation</h4>
+                    <p>ROCm platform docs and GPU programming references</p>
+                  </div>
+                </a>
+                <a
+                  className="doc-item"
+                  href="https://github.com/Project-HAMi/HAMi"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  <div
+                    className="doc-icon"
+                    style={{ background: "#e6f4ea", color: "#1e8e3e" }}
+                  >
+                    <i className="fa fa-cube"></i>
+                  </div>
+                  <div className="doc-text">
+                    <h4>HAMi vGPU Documentation</h4>
+                    <p>NVIDIA vGPU hard-quota scheduler and device plugin</p>
                   </div>
                 </a>
                 <a
@@ -827,7 +842,7 @@ function App() {
           >
             <div className="onboarding-modal-header">
               <div>
-                <div className="onboarding-modal-eyebrow">AUP quick guide</div>
+                <div className="onboarding-modal-eyebrow">Quick guide</div>
                 <div className="onboarding-modal-step-label">Step {onboardingStep + 1} of 3</div>
               </div>
               <button className="onboarding-close" onClick={handleCloseOnboarding} type="button" title="Close onboarding">
@@ -839,27 +854,25 @@ function App() {
               {onboardingStep === 0 && (
                 <div className="onboarding-step-layout">
                   <div className="onboarding-panel-copy">
-                    <span className="onboarding-kicker">Developer resources</span>
-                    <h2 id="onboarding-modal-title">AMD Developer Program</h2>
+                    <span className="onboarding-kicker">Platform overview</span>
+                    <h2 id="onboarding-modal-title">GPU learning cloud</h2>
                     <p>
-                      Scan the QR code or open the Developer Program to explore documentation, tools, and updates beyond the platform.
+                      hami-learning-cloud provides shared GPU Jupyter environments with
+                      NVIDIA HAMi vGPU hard quotas and AMD ROCm time slicing.
                     </p>
                     <div className="onboarding-resource-summary">
-                      Keep this page handy when you want deeper ROCm docs, learning paths, or AMD developer updates.
+                      Use Home to check your server, Spawn to choose a resource, and JupyterLab to run notebooks.
                     </div>
                   </div>
-                  <div className="onboarding-dev-resources">
-                    <div className="onboarding-qr-card" aria-label="Developer Program QR code">
-                      <img src={onboardingDeveloperProgramQrUrl} alt="QR code for AMD Developer Program" />
-                      <span>Scan to open AMD Developer Program</span>
+                  <div className="onboarding-side-card onboarding-side-card-highlight">
+                    <div className="onboarding-side-card-icon">
+                      <i className="fa fa-microchip"></i>
                     </div>
-                    <div className="onboarding-side-card">
-                      <h3>Open the Developer Program</h3>
-                      <p>Explore AMD documentation, tooling, community resources, and the latest developer updates.</p>
-                      <a className="btn-launch" href={DEVELOPER_PROGRAM_URL} rel="noopener noreferrer" target="_blank">
-                        <i className="fa fa-external-link"></i> AMD AI Developer Program
-                      </a>
-                    </div>
+                    <h3>Two GPU paths</h3>
+                    <p>
+                      NVIDIA workloads use HAMi vGPU memory/compute quotas. AMD workloads use
+                      time-sliced GPU sharing on ROCm nodes.
+                    </p>
                   </div>
                 </div>
               )}
@@ -871,7 +884,7 @@ function App() {
                     <h2 id="onboarding-modal-title">Welcome to {platformName}</h2>
                     <p>
                       This short guide will show you how to get started, where to launch your environment,
-                      and where to find AMD developer resources later.
+                      and where to find GPU documentation later.
                     </p>
                     <div className="onboarding-feature-list">
                       <div className="onboarding-feature-card">
@@ -880,7 +893,7 @@ function App() {
                       </div>
                       <div className="onboarding-feature-card">
                         <strong>Launch Jupyter</strong>
-                        <span>Start quickly with prepared notebooks, tools, and AMD acceleration already wired in.</span>
+                        <span>Start quickly with prepared notebooks, terminals, and GPU acceleration already wired in.</span>
                       </div>
                       <div className="onboarding-feature-card">
                         <strong>Keep exploring</strong>
