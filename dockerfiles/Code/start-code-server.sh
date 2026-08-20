@@ -14,7 +14,11 @@ service_prefix="${JUPYTERHUB_SERVICE_PREFIX:-/}"
 workdir="${AUPLC_CODE_WORKDIR:-$(pwd)}"
 extensions_list="${AUPLC_CODE_EXTENSIONS_LIST:-/opt/auplc/extensions/extensions.txt}"
 local_extensions_dir="${AUPLC_CODE_LOCAL_EXTENSIONS_DIR:-/opt/auplc/extensions/local}"
-extensions_dir="${AUPLC_CODE_EXTENSIONS_DIR:-/home/jovyan/.local/share/code-server/extensions}"
+# Container-local by default: the home volume is often a slow NFS share, and
+# copying the baked extension set (~167 MB, thousands of small files) there on
+# first boot blows the Hub's http_timeout. User-installed extensions then live
+# in the container and are reset when the pod is recreated.
+extensions_dir="${AUPLC_CODE_EXTENSIONS_DIR:-/opt/auplc/code-server/extensions}"
 trusted_domains="${AUPLC_CODE_TRUSTED_DOMAINS:-}"
 
 mkdir -p "${NPM_CONFIG_PREFIX}/bin"
@@ -34,10 +38,11 @@ seed_builtin_extensions() {
     return 0
   fi
 
-  # First launch: prefer the image-baked extension set (installed at build
-  # time) so startup needs no network access and stays well under the
-  # Hub's http_timeout.
-  if [ -d "/opt/auplc/code-server/extensions" ] && [ -n "$(ls -A /opt/auplc/code-server/extensions 2>/dev/null)" ]; then
+  # If the extensions dir points somewhere else (e.g. a persistent volume via
+  # AUPLC_CODE_EXTENSIONS_DIR), seed it from the image-baked set.
+  if [ "${extensions_dir}" != "/opt/auplc/code-server/extensions" ] \
+    && [ -d "/opt/auplc/code-server/extensions" ] \
+    && [ -n "$(ls -A /opt/auplc/code-server/extensions 2>/dev/null)" ]; then
     cp -a /opt/auplc/code-server/extensions/. "${extensions_dir}/"
     return 0
   fi
