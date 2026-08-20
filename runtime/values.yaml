@@ -270,8 +270,8 @@ custom:
         memory_limit: "6Gi"
       gpu:
         cpu: "4"
-        memory: "16Gi"
-        memory_limit: "16Gi"
+        memory: "8Gi"
+        memory_limit: "8Gi"
         amd.com/gpu: "1"
       code-cpu:
         cpu: "2"
@@ -279,8 +279,8 @@ custom:
         memory_limit: "6Gi"
       code-gpu:
         cpu: "4"
-        memory: "16Gi"
-        memory_limit: "16Gi"
+        memory: "8Gi"
+        memory_limit: "8Gi"
         amd.com/gpu: "1"
       none:
         cpu: "0"
