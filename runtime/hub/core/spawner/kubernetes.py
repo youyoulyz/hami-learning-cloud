@@ -142,7 +142,9 @@ class RemoteLabKubeSpawner(KubeSpawner):
         }
 
         # Extract accelerator configuration
-        cls.accelerator_options = {k: v.model_dump() for k, v in config.accelerators.items()}
+        cls.accelerator_options = {
+            k: {**v.model_dump(), **config.get_accelerator_routing(k)} for k, v in config.accelerators.items()
+        }
         cls.node_selector_mapping = {k: v.nodeSelector for k, v in config.accelerators.items()}
         cls.environment_mapping = {k: v.env for k, v in config.accelerators.items()}
 
@@ -281,7 +283,11 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
         # Parse runtime
         runtime_minutes = formdata.get("runtime", ["20"])[0]
-        options["runtime_minutes"] = int(runtime_minutes)
+        try:
+            runtime_minutes = int(runtime_minutes)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("Runtime must be an integer number of minutes") from exc
+        options["runtime_minutes"] = runtime_minutes
 
         # Parse resource type
         resource_type_list = formdata.get("resource_type", [])
@@ -298,6 +304,8 @@ class RemoteLabKubeSpawner(KubeSpawner):
         # Validate resource type
         if resource_type not in self.resource_images:
             raise RuntimeError(f"Unknown Resource: {resource_type}")
+
+        self._validate_resource_accelerator_selection(resource_type, gpu_selection)
 
         # Configure spawner based on selections
         self._configure_spawner(resource_type, gpu_selection)
@@ -324,6 +332,30 @@ class RemoteLabKubeSpawner(KubeSpawner):
             options["repo_branch"] = repo_branch
 
         return options
+
+    def _validate_resource_accelerator_selection(
+        self, resource_type: str, gpu_selection: str | None
+    ) -> None:
+        """Validate form selections against server-side resource metadata."""
+        if not self._hub_config:
+            if gpu_selection:
+                raise RuntimeError("Accelerator selection is unavailable")
+            return
+
+        metadata = self._hub_config.get_resource_metadata(resource_type)
+        allowed = list(getattr(metadata, "acceleratorKeys", []) or []) if metadata else []
+        if gpu_selection is None or not str(gpu_selection).strip():
+            if allowed:
+                raise RuntimeError(f"Resource '{resource_type}' requires an accelerator selection")
+            return
+
+        gpu_selection = str(gpu_selection).strip()
+        if gpu_selection not in self.accelerator_options:
+            raise RuntimeError(f"Unknown accelerator: {gpu_selection}")
+        if gpu_selection not in allowed:
+            raise RuntimeError(
+                f"Accelerator '{gpu_selection}' is not allowed for resource '{resource_type}'"
+            )
 
     def _resolve_repo_persist_option(self, formdata) -> bool:
         git_config = self._hub_config.git_clone if self._hub_config else None
@@ -751,14 +783,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
             return "cpu"
         accelerator = self.accelerator_options.get(gpu_selection, {})
         vendor = str(accelerator.get("vendor") or "").lower()
-        if vendor:
-            return vendor
-        key = gpu_selection.lower()
-        if "nvidia" in key:
-            return "nvidia"
-        if "amd" in key:
-            return "amd"
-        return "unknown"
+        return vendor or "unknown"
 
     def _accelerator_scheduler(self, gpu_selection: str | None) -> str:
         if not gpu_selection:
@@ -949,7 +974,12 @@ class RemoteLabKubeSpawner(KubeSpawner):
         """Start the spawner and schedule automatic shutdown."""
         # Ensure pod fails immediately (not retried) when an init container fails.
         # JupyterHub manages pod lifecycle; Kubernetes should not silently restart pods.
-        self.extra_pod_config = {"restartPolicy": "Never"}
+        # Preserve values supplied through singleuser.extraPodConfig while
+        # ensuring JupyterHub-owned user pods are not restarted by Kubernetes.
+        self.extra_pod_config = {
+            **copy.deepcopy(self.extra_pod_config or {}),
+            "restartPolicy": "Never",
+        }
 
         runtime_minutes = self.user_options.get("runtime_minutes", 20)
         resource_type = self.user_options.get("resource_type", "cpu")
@@ -966,9 +996,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
         from core.quota import get_quota_manager
 
         quota_manager = get_quota_manager()
-
-        # Always start a usage session for tracking, regardless of quota state
-        self.usage_session_id = quota_manager.start_usage_session(username, resource_type, accelerator_type)
 
         # Quota check (if enabled)
         if self.quota_enabled:
@@ -1132,6 +1159,11 @@ class RemoteLabKubeSpawner(KubeSpawner):
         target_path = self._resolve_target_path(resource_type, custom_repo_path)
         self._apply_target_path_mapping(resource_type, target_path)
 
+        # Create the active usage row only after all preflight/configuration
+        # work succeeds and quota validation has passed. This prevents failed
+        # form, image, token, or init-container setup from leaking sessions.
+        self.usage_session_id = quota_manager.start_usage_session(username, resource_type, accelerator_type)
+
         if getattr(self, "_has_git_init_container", False):
             ref_key = f"{self.namespace}/{self.pod_name}"
             start_task = asyncio.ensure_future(super().start())
@@ -1163,7 +1195,18 @@ class RemoteLabKubeSpawner(KubeSpawner):
                     await self.stop(True)
                 raise
         else:
-            start_result = await super().start()
+            try:
+                start_result = await super().start()
+            except Exception:
+                # A failed Kubernetes spawn must not leave an active quota row.
+                session_id = getattr(self, "usage_session_id", None)
+                self.usage_session_id = None
+                if session_id:
+                    with contextlib.suppress(Exception):
+                        quota_manager.end_usage_session(
+                            session_id, self.quota_rates if self.quota_enabled else None
+                        )
+                raise
 
         # Store for internal use
         self.start_time = start_time

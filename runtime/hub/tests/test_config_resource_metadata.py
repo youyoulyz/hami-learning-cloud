@@ -46,6 +46,7 @@ def load_module(name: str, path: Path):
 config = load_module("core.config", CORE / "config.py")
 ParsedConfig = config.ParsedConfig
 ResourceMetadata = config.ResourceMetadata
+HubConfig = config.HubConfig
 
 
 def test_resource_metadata_default_path_omitted_or_null_stays_none():
@@ -96,3 +97,80 @@ def test_code_server_extra_trusted_domains_parse_from_config():
     )
 
     assert parsed_config.codeServer.extraTrustedDomains == ["docs.example.edu", "git.example.edu"]
+
+
+def _valid_routing_config() -> HubConfig:
+    instance = HubConfig()
+    instance._config = ParsedConfig.model_validate(
+        {
+            "accelerators": {
+                "nvidia": {
+                    "displayName": "NVIDIA",
+                    "nodeSelector": {"gpu-vendor": "nvidia"},
+                },
+                "amd": {
+                    "displayName": "AMD",
+                    "nodeSelector": {"gpu-vendor": "amd"},
+                },
+            },
+            "acceleratorRouting": {
+                "nvidia": {"vendor": "nvidia", "scheduler_name": "hami-scheduler", "runtime_class_name": "nvidia"},
+                "amd": {"vendor": "amd", "scheduler_name": "default-scheduler", "runtime_class_name": ""},
+            },
+            "resources": {
+                "metadata": {
+                    "gpu": {
+                        "acceleratorKeys": ["nvidia", "amd"],
+                        "acceleratorOverrides": {"amd": {"image": "rocm/image:v1"}},
+                    }
+                }
+            },
+        }
+    )
+    return instance
+
+
+def test_accelerator_contract_accepts_explicit_vendor_routing():
+    _valid_routing_config()._validate_accelerator_contract()
+
+
+@pytest.mark.parametrize(
+    "field_override",
+    [
+        {"vendor": "intel"},
+        {"scheduler_name": "default-scheduler"},
+        {"runtime_class_name": "nvidia", "vendor": "amd"},
+    ],
+)
+def test_accelerator_contract_rejects_invalid_routing(field_override):
+    instance = _valid_routing_config()
+    raw = {
+        "displayName": "NVIDIA",
+        "nodeSelector": {"gpu-vendor": "nvidia"},
+    }
+    raw.update(field_override)
+    instance._config = ParsedConfig.model_validate(
+        {"accelerators": {"nvidia": raw}, "acceleratorRouting": {"nvidia": {**field_override, "vendor": field_override.get("vendor", "nvidia"), "scheduler_name": field_override.get("scheduler_name", "hami-scheduler"), "runtime_class_name": field_override.get("runtime_class_name", "nvidia")}}}
+    )
+    with pytest.raises(ValueError):
+        instance._validate_accelerator_contract()
+
+
+def test_accelerator_contract_rejects_unknown_resource_reference():
+    instance = _valid_routing_config()
+    instance._config = ParsedConfig.model_validate(
+        {
+            "accelerators": {
+                "nvidia": {
+                    "displayName": "NVIDIA",
+                    "vendor": "nvidia",
+                    "scheduler_name": "hami-scheduler",
+                    "runtime_class_name": "nvidia",
+                    "nodeSelector": {"gpu-vendor": "nvidia"},
+                }
+            },
+            "resources": {"metadata": {"gpu": {"acceleratorKeys": ["missing"]}}},
+        }
+    )
+    with pytest.raises(ValueError, match="unknown accelerator"):
+        instance._validate_accelerator_contract()

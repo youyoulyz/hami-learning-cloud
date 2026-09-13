@@ -80,9 +80,14 @@ def emit_overlay(
                 buf.write("  accelerators:\n")
                 any_accel_emitted = True
             buf.write(f"    {sku.accel_key}:\n")
-            if sku.product_name:
-                buf.write("      nodeSelector:\n")
-                buf.write(f'        amd.com/gpu.product-name: "{sku.product_name}"\n')
+            display_text = sku.display_name or (sku.product_name.replace("_", " ") if sku.product_name else "AMD GPU")
+            buf.write(f'      displayName: "{display_text}"\n')
+            buf.write(f'      description: "AMD accelerator ({sku.gpu_target})"\n')
+            buf.write("      nodeSelector:\n")
+            buf.write(
+                f'        amd.com/gpu.product-name: "{sku.product_name or sku.accel_key}"\n'
+            )
+            buf.write(f"      quotaRate: {sku.quota_rate}\n")
             if sku.accel_env:
                 buf.write("      env:\n")
                 buf.write(f'        HSA_OVERRIDE_GFX_VERSION: "{sku.accel_env}"\n')
@@ -107,6 +112,17 @@ def emit_overlay(
             else:
                 buf.write("      env: {}\n")
             buf.write(f"      quotaRate: {sku.quota_rate}\n")
+
+    # Explicit routing is kept in a separate custom key so the vendor-neutral
+    # Z2JH chart schema remains unchanged. Include every detected SKU,
+    # including curated SKUs whose accelerator stanza is intentionally omitted.
+    if cfg.skus:
+        buf.write("  acceleratorRouting:\n")
+        for sku in cfg.skus:
+            buf.write(f"    {sku.accel_key}:\n")
+            buf.write('      vendor: "amd"\n')
+            buf.write('      scheduler_name: "default-scheduler"\n')
+            buf.write('      runtime_class_name: ""\n')
 
     # --- resources block: GPU course images + metadata ---
     emit_resources = [r for r in GPU_RESOURCE_KEYS if not filter_courses or courses.is_selected(r)]

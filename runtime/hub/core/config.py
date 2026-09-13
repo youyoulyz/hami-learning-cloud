@@ -70,8 +70,18 @@ class AcceleratorConfig(BaseModel):
     nodeSelector: dict[str, str] = Field(default_factory=dict)
     env: dict[str, str] = Field(default_factory=dict)
     quotaRate: int = 1
-    vendor: str = ""
+    vendor: Literal["nvidia", "amd"] | None = None
     scheduler_name: str = ""
+    runtime_class_name: str = ""
+
+    model_config = {"extra": "allow"}
+
+
+class AcceleratorRoutingConfig(BaseModel):
+    """Explicit vendor/scheduler/runtime routing for an accelerator."""
+
+    vendor: Literal["nvidia", "amd"]
+    scheduler_name: str
     runtime_class_name: str = ""
 
     model_config = {"extra": "allow"}
@@ -212,6 +222,7 @@ class ParsedConfig(BaseModel):
 
     resources: ResourcesConfig = Field(default_factory=ResourcesConfig)
     accelerators: dict[str, AcceleratorConfig] = Field(default_factory=dict)
+    acceleratorRouting: dict[str, AcceleratorRoutingConfig] = Field(default_factory=dict)
     teams: TeamsConfig = Field(default_factory=TeamsConfig)
     quota: QuotaSettings = Field(default_factory=QuotaSettings)
     gitClone: GitCloneSettings = Field(default_factory=GitCloneSettings)
@@ -227,6 +238,7 @@ class ParsedConfig(BaseModel):
         cls,
         resources: dict | None = None,
         accelerators: dict | None = None,
+        accelerator_routing: dict | None = None,
         teams: dict | None = None,
         quota: dict | None = None,
         git_clone: dict | None = None,
@@ -242,6 +254,8 @@ class ParsedConfig(BaseModel):
             raw_config["resources"] = resources
         if accelerators:
             raw_config["accelerators"] = accelerators
+        if accelerator_routing:
+            raw_config["acceleratorRouting"] = accelerator_routing
         if teams:
             raw_config["teams"] = teams
         if quota:
@@ -335,6 +349,7 @@ class HubConfig:
         instance._config = ParsedConfig.from_dicts(
             resources=raw_config.get("resources"),
             accelerators=raw_config.get("accelerators"),
+            accelerator_routing=raw_config.get("acceleratorRouting"),
             teams=raw_config.get("teams"),
             quota=raw_config.get("quota"),
             git_clone=raw_config.get("gitClone"),
@@ -343,6 +358,8 @@ class HubConfig:
             code_server=raw_config.get("codeServer"),
             notifications=raw_config.get("notifications"),
         )
+
+        instance._validate_accelerator_contract()
 
         # Quota enabled: from config or auto-detect based on auth_mode
         if instance._config.quota.enabled is not None:
@@ -365,6 +382,66 @@ class HubConfig:
             print(f"[CONFIG]   quota_rates={instance.build_quota_rates()}")
 
         return instance
+
+    def _validate_accelerator_contract(self) -> None:
+        """Validate accelerator routing before the Hub accepts user input."""
+        for key, accelerator in self.accelerators.items():
+            routing = self._resolved_accelerator_routing(key, accelerator, self.acceleratorRouting.get(key))
+            vendor = routing["vendor"]
+            if vendor not in {"nvidia", "amd"}:
+                raise ValueError(
+                    f"Accelerator '{key}' must declare vendor as 'nvidia' or 'amd'"
+                )
+            if not accelerator.nodeSelector:
+                raise ValueError(f"Accelerator '{key}' must declare a non-empty nodeSelector")
+
+            expected_scheduler = "hami-scheduler" if vendor == "nvidia" else "default-scheduler"
+            if routing["scheduler_name"] != expected_scheduler:
+                raise ValueError(
+                    f"Accelerator '{key}' ({vendor}) must use scheduler_name={expected_scheduler!r}"
+                )
+            if vendor == "nvidia" and routing["runtime_class_name"] != "nvidia":
+                raise ValueError(
+                    f"Accelerator '{key}' (nvidia) must use runtime_class_name='nvidia'"
+                )
+            if vendor == "amd" and routing["runtime_class_name"]:
+                raise ValueError(
+                    f"Accelerator '{key}' (amd) must leave runtime_class_name empty"
+                )
+
+        configured = set(self.accelerators)
+        for resource_key, metadata in self.resources.metadata.items():
+            for accelerator_key in metadata.acceleratorKeys:
+                if accelerator_key not in configured:
+                    raise ValueError(
+                        f"Resource '{resource_key}' references unknown accelerator '{accelerator_key}'"
+                    )
+            if metadata.acceleratorOverrides:
+                for accelerator_key in metadata.acceleratorOverrides:
+                    if accelerator_key not in configured:
+                        raise ValueError(
+                            f"Resource '{resource_key}' has override for unknown accelerator '{accelerator_key}'"
+                        )
+
+    @staticmethod
+    def _resolved_accelerator_routing(
+        key: str, accelerator: AcceleratorConfig, routing: AcceleratorRoutingConfig | None = None
+    ) -> dict[str, str]:
+        """Return explicit routing, accepting inline fields for compatibility."""
+        if routing is not None:
+            return routing.model_dump()
+        if accelerator.vendor and accelerator.scheduler_name:
+            return {
+                "vendor": accelerator.vendor,
+                "scheduler_name": accelerator.scheduler_name,
+                "runtime_class_name": accelerator.runtime_class_name,
+            }
+        raise ValueError(f"Accelerator '{key}' must have an explicit acceleratorRouting entry")
+
+    def get_accelerator_routing(self, key: str) -> dict[str, str]:
+        accelerator = self.accelerators[key]
+        routing = self.acceleratorRouting.get(key)
+        return self._resolved_accelerator_routing(key, accelerator, routing)
 
     @classmethod
     def get(cls) -> HubConfig:

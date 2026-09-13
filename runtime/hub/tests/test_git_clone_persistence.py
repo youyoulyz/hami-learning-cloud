@@ -127,6 +127,26 @@ def test_git_clone_settings_explicit_persistence_overrides_parse_correctly():
     assert settings.defaultPersistence is False
 
 
+def test_resource_accelerator_selection_rejects_unknown_or_disallowed_values():
+    spawner = make_spawner(
+        resource_metadata={
+            "gpu": ResourceMetadata(acceleratorKeys=["nvidia"]),
+            "cpu": ResourceMetadata(acceleratorKeys=[]),
+        }
+    )
+    spawner.accelerator_options = {"nvidia": {}, "amd": {}}
+
+    spawner._validate_resource_accelerator_selection("gpu", "nvidia")
+    with pytest.raises(RuntimeError, match="not allowed"):
+        spawner._validate_resource_accelerator_selection("gpu", "amd")
+    with pytest.raises(RuntimeError, match="Unknown accelerator"):
+        spawner._validate_resource_accelerator_selection("gpu", "missing")
+    with pytest.raises(RuntimeError, match="requires an accelerator"):
+        spawner._validate_resource_accelerator_selection("gpu", None)
+    with pytest.raises(RuntimeError, match="not allowed"):
+        spawner._validate_resource_accelerator_selection("cpu", "nvidia")
+
+
 def test_repo_persist_submission_is_ignored_when_admin_choice_is_disabled():
     spawner = make_spawner(GitCloneSettings(allowPersistenceChoice=False, defaultPersistence=True))
 
